@@ -752,9 +752,9 @@ Return Value:
         WDFKEY hKey;
 
         // PWDF_OBJECT_ATTRIBUTES KeyAttributes,
-        status = WdfDriverOpenPersistentStateRegistryKey(
-            WdfGetDriver(), STANDARD_RIGHTS_ALL, WDF_NO_OBJECT_ATTRIBUTES,
-            &hKey);
+        status = WdfDriverOpenPersistentStateRegistryKey(WdfGetDriver(),
+                                                         STANDARD_RIGHTS_ALL, WDF_NO_OBJECT_ATTRIBUTES,
+                                                         &hKey);
         if (!NT_SUCCESS(status))
           break;
         status = save_configuration_to_registry(hKey, forking_machine);
