@@ -738,6 +738,10 @@ Return Value:
         int values[5];
         for (int i=0; i< InputBufferLength/sizeof(int); i++) {
             // *(PULONG)
+
+            // fix buffer-overflow!
+            if (i==5) break;
+
             values[i] = *((int*) InputBuffer + i);
         }
         // other values should be zero.
