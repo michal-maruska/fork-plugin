@@ -190,11 +190,11 @@ bool fork_configure(HANDLE file, std::array<int,4> command)
 {
     ULONG bytes=0;
 
-    if (!DeviceIoControl (file,
-                          IOCTL_KBFILTR_SET_FORK,
-                          command.data(), sizeof(command),
-                          NULL, 0, // sizeof(kbdattrib)
-                          &bytes, NULL)) {
+    if (!DeviceIoControl(file,
+                         IOCTL_KBFILTR_SET_FORK,
+                         command.data(), sizeof(command),
+                         NULL, 0,
+                         &bytes, NULL)) {
         printf("fork_configure request failed:0x%x\n", GetLastError());
 
         return FALSE;
@@ -202,9 +202,9 @@ bool fork_configure(HANDLE file, std::array<int,4> command)
     return TRUE;
 }
 
-int
-_cdecl
-main(
+const int SET_VALUE = 1;
+
+int _cdecl main(
     _In_ int argc,
     _In_ char *argv[]
     )
@@ -280,10 +280,8 @@ main(
             fork_configure(file,
                            std::array<int,4> {
                              fork_configure_key_fork << 2 | fork_LOCAL_OPTION,
-                             // code, fork
                              keycode, fork,
-                             // set
-                             1
+                             SET_VALUE
                            });
         }
     }
