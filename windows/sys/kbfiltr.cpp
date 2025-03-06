@@ -496,11 +496,12 @@ save_configuration_to_registry(IN WDFKEY hKey,
     DECLARE_CONST_UNICODE_STRING(valueBinary, L"binary-forks");
     ULONG binary_values[MAX_FORKS];
     int top = 0;
+    const short NO_FORK = 0;
 
     for(USHORT key = 0; key < MAX_KEYCODE; key++) {
         // int -> short
         if (USHORT value = (USHORT) forking_machine->configure_key(fork_configure_key_fork, key,  0, GET);
-            value != 0)
+            value != NO_FORK)
         {
             DebugPrint(("found a forked key: %u ->  %u\n", key, value));
 
@@ -513,15 +514,12 @@ save_configuration_to_registry(IN WDFKEY hKey,
         }
     }
 
-    if (top != 0) {
-        status = WdfRegistryAssignValue(hKey, &valueBinary,
+    // if top got to 0 we still should write out the ZERO configuration
+    // since maybe previously there was some.
+    status = WdfRegistryAssignValue(hKey, &valueBinary,
                                         REG_BINARY,
                                         top * sizeof(ULONG),
                                         binary_values);
-    } else {
-        DebugPrint(("Nothing to store about forked keys\n"));
-    }
-
     return status;
 }
 
