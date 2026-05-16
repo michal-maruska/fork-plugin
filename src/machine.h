@@ -267,9 +267,8 @@ public:
         environment->log("ctor: allocated last_events %lu (%lu\n", last_events_log.size(), max_last);
 
         environment->log("ctor: resetting forkActive\n");
-        for (auto &i: forkActive) { // unsigned char
-            i = KEYCODE_UNUSED; /* not active */
-        };
+        std::fill(std::begin(forkActive), std::end(forkActive), KEYCODE_UNUSED);
+
         environment->log("ctor: end\n");
     };
 
