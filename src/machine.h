@@ -454,7 +454,9 @@ private:
         verificator_keycode = no_key;
 
         tq.rewind_middle();
-        log_queues("after rewind");
+        if (config->debug) {
+            log_queues("after rewind");
+        }
     }
 
    /**
@@ -936,7 +938,9 @@ private:
             }
         }
 
-        log_queues("Before flushing:");
+        if (config->debug) {
+            log_queues("Before flushing:");
+        }
         // unlocked now, why?
         flush_to_next();
     };
