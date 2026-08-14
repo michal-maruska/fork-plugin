@@ -73,7 +73,7 @@ private:
 
 #ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
-    using  scoped_lock = std::scoped_lock<std::mutex>;
+    using  scoped_lock = std::unique_lock<std::mutex>;
 
     void do_lock() const
     {
@@ -956,23 +956,8 @@ private:
 
     // can modify the event!
     void relay_event(const PlatformEvent& event) {
-        // (ORDER) this event must be delivered before any other!
-        // so no preemption of this part!  Are we re-entrant?
-        // yet, the next plugin could call in here? to do what?
-
-        // machine. fixme: it's not true -- it cannot!
-        // 2020: it can!
-        // so ... this is front_lock?
-
-        // why unlock during this? maybe also during the push_time_to_next then?
-        // because it can call into back to us? NotifyThaw()
-
-        // fixme: was here a bigger message?
-        // bug: environment->fmt_event(ev->p_event);
-        do_unlock();
-        // we must gurantee ORDER
+        // we must guarantee ORDER
         environment->relay_event(event);
-        do_lock();
     };
 
 
@@ -983,15 +968,26 @@ private:
      *queue. Unlocks to be re-entrant!
      **/
     void flush_to_next() {
-        while (!environment->output_frozen() && tq.can_pop()) {
-            scoped_lock lock(mLock);
-            const PlatformEvent& event = tq.head(); // copy ?
-            // fixme ... temporarily ... not pop before sending off !
-            save_event_to_log(event);
-            // unlocks!
-            // todo: should extract the platformEvent, then pop, and deliver.
-            tq.pop();
-            relay_event(event);
+        while (!environment->output_frozen()) {
+            bool has_event = false;
+            {
+                scoped_lock lock(mLock);
+                if (tq.can_pop()) {
+                    has_event = true;
+                }
+            }
+            if (has_event) {
+                PlatformEvent event = [&]() {
+                    scoped_lock lock(mLock);
+                    PlatformEvent ev = tq.head();
+                    save_event_to_log(ev);
+                    tq.pop();
+                    return ev;
+                }();
+                relay_event(event);
+            } else {
+                break;
+            }
         }
         if (!environment->output_frozen()) {
             push_time_to_next();
@@ -1009,13 +1005,16 @@ private:
         // if that plugin is gone. todo!
 
         Time now;
-        const PlatformEvent *item = tq.first();
-        if (item == nullptr) {
-            now = mCurrent_time;
-        } else {
-            now = environment->time_of(*item);
-            // in this case we might:
-            mCurrent_time = 0;
+        {
+            scoped_lock lock(mLock);
+            const PlatformEvent *item = tq.first();
+            if (item == nullptr) {
+                now = mCurrent_time;
+            } else {
+                now = environment->time_of(*item);
+                // in this case we might:
+                mCurrent_time = 0;
+            }
         }
 
         if (now) {
@@ -1026,7 +1025,7 @@ private:
 
     // fixme: returned by the accept_* public API methods
     [[nodiscard]] Time next_decision_time() const {
-        // bug: not locked
+        scoped_lock lock(mLock);
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
@@ -1107,6 +1106,7 @@ public:
     int dump_last_events_to_client(event_publisher<archived_event_t>* publisher, int max_requested) {
         // I don't need to count them! last_events_count
         // should be locked
+        scoped_lock lock(mLock);
         int queue_count = last_events_log.size();
 
         if (max_requested > queue_count) {
