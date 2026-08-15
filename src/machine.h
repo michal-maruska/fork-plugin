@@ -72,32 +72,32 @@ public:
 private:
 
 #ifndef DISABLE_STD_LIBRARY
-    mutable std::mutex m_lock;
-    using  scoped_lock = std::unique_lock<std::mutex>;
+    mutable std::mutex mLock;
+    using  unique_lock = std::unique_lock<std::mutex>;
 
     void do_lock() const
     {
-        m_lock.lock();
+        mLock.lock();
     }
     void do_unlock() const
     {
-        m_lock.unlock();
+        mLock.unlock();
     }
-    static void check_locked() {/* assert(m_lock.locked); */}
+    static void check_locked() {/* assert(mLock.locked); */}
 #else
-    int m_lock = 0;
+    int mLock = 0;
 
     template <typename mutex>
-    class empty_scoped_lock
+    class empty_unique_lock
     {
     public:
-        empty_scoped_lock(mutex m) {
+        empty_unique_lock(mutex m) {
             UNUSED(m);
         };
 
-        ~empty_scoped_lock() {}
+        ~empty_unique_lock() {}
     };
-    using  scoped_lock = empty_scoped_lock<int>;
+    using  unique_lock = empty_unique_lock<int>;
 
     void lock() const {};
     void unlock() const {};
@@ -269,7 +269,7 @@ public:
      * @value .. either parameter is set to this value if @set is 1
      * or ... ignored  */
     int configure_global(fork_configuration_t type, int value, bool set) {
-        scoped_lock lock(m_lock);
+        unique_lock lock(mLock);
         const auto fork_configuration =
 #ifndef DISABLE_STD_LIBRARY
             this->config.get()
@@ -356,14 +356,14 @@ public:
     }
 
     void set_debug(int level) {
-        scoped_lock lock(m_lock);
+        unique_lock lock(mLock);
         config->debug = level;
         // (machine->config->debug? 0: 1);
     }
 
     void stop() {
         // wait & stop
-        scoped_lock wait_lock(m_lock);
+        unique_lock wait_lock(mLock);
     }
 
 
@@ -902,7 +902,7 @@ private:
     void run_automaton(bool force_also) {
         // fixme: maybe All I need is the nextPlugin?
         {
-            scoped_lock lock(m_lock);
+            unique_lock lock(mLock);
 #if 0
             if (environment->output_frozen() || (! tq.middle_empty() )) {
                 // log_queues_and_nextplugin(message)
@@ -971,14 +971,14 @@ private:
         while (!environment->output_frozen()) {
             bool has_event = false;
             {
-                scoped_lock lock(m_lock);
+                unique_lock lock(mLock);
                 if (tq.can_pop()) {
                     has_event = true;
                 }
             }
             if (has_event) {
                 PlatformEvent event = [&]() {
-                    scoped_lock lock(m_lock);
+                    unique_lock lock(mLock);
                     PlatformEvent ev = tq.head();
                     save_event_to_log(ev);
                     tq.pop();
@@ -1006,7 +1006,7 @@ private:
 
         Time now;
         {
-            scoped_lock lock(m_lock);
+            unique_lock lock(mLock);
             const PlatformEvent *item = tq.first();
             if (item == nullptr) {
                 now = mCurrent_time;
@@ -1025,7 +1025,7 @@ private:
 
     // fixme: returned by the accept_* public API methods
     [[nodiscard]] Time next_decision_time() const {
-        scoped_lock lock(m_lock);
+        unique_lock lock(mLock);
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
@@ -1106,7 +1106,7 @@ public:
     int dump_last_events_to_client(event_publisher<archived_event_t>* publisher, int max_requested) {
         // I don't need to count them! last_events_count
         // should be locked
-        scoped_lock lock(m_lock);
+        unique_lock lock(mLock);
         int queue_count = last_events_log.size();
 
         if (max_requested > queue_count) {
@@ -1140,7 +1140,7 @@ public:
         @return false if allocation  failed.
     */
     bool create_configs() {
-        scoped_lock lock(m_lock);
+        unique_lock lock(mLock);
 
         environment->log("%s\n", __func__);
 
@@ -1171,7 +1171,7 @@ public:
     }
 
     void dump_last_events(event_dumper<archived_event_t>* dumper) const {
-        scoped_lock lock(m_lock);
+        unique_lock lock(mLock);
 #if DISABLE_STD_LIBRARY
 #if 0
         std::function<void(const event_dumper&, const archived_event_t&)> doit0 = &event_dumper::operator();
@@ -1231,7 +1231,7 @@ public:
      */
     Time accept_event(const PlatformEvent& pevent) noexcept(false) {
         {
-            scoped_lock lock(m_lock);
+            unique_lock lock(mLock);
             const Keycode key = environment->detail_of(pevent);
 #if 0
             environment->fmt_event(__func__, pevent);
@@ -1280,7 +1280,7 @@ public:
 
     Time accept_time(const Time now) {
         {
-            scoped_lock lock(m_lock);
+            unique_lock lock(mLock);
             /* push the time ! */
             // sometimes now is 0 -- when I ungrab-keyboard from sfc.
             if (mCurrent_time > now) {
