@@ -12,6 +12,7 @@
 #include "triqueue.h"
 #include "platform.h"
 #include "colors.h"
+#include "empty_unique_lock.h"
 
 #ifndef DISABLE_STD_LIBRARY
 #include <mutex>
@@ -87,16 +88,6 @@ private:
 #else
     int mLock = 0;
 
-    template <typename mutex>
-    class empty_unique_lock
-    {
-    public:
-        empty_unique_lock(mutex m) {
-            UNUSED(m);
-        };
-
-        ~empty_unique_lock() {}
-    };
     using  unique_lock = empty_unique_lock<int>;
 
     void lock() const {};
