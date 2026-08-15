@@ -20,6 +20,7 @@
 #include <memory>
 #include <algorithm>
 #include <functional>
+#include <optional>
 #endif
 
 #ifndef KERNEL
@@ -951,6 +952,29 @@ private:
         environment->relay_event(event);
     };
 
+#ifndef DISABLE_STD_LIBRARY
+    [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present() {
+        unique_lock lock(mLock);
+        if (tq.can_pop()) {
+            PlatformEvent ev = tq.head();
+            save_event_to_log(ev);
+            tq.pop();
+            return ev;
+        }
+        return std::nullopt;
+    }
+#else
+    bool pop_event_if_present(PlatformEvent& out_event) {
+        unique_lock lock(mLock);
+        if (tq.can_pop()) {
+            out_event = tq.head();
+            save_event_to_log(out_event);
+            tq.pop();
+            return true;
+        }
+        return false;
+    }
+#endif
 
     /**
      * Push as many as possible from the OUTPUT queue to the next layer.
@@ -960,25 +984,21 @@ private:
      **/
     void flush_to_next() {
         while (!environment->output_frozen()) {
-            bool has_event = false;
-            {
-                unique_lock lock(mLock);
-                if (tq.can_pop()) {
-                    has_event = true;
-                }
+#ifndef DISABLE_STD_LIBRARY
+            auto event = pop_event_if_present();
+            if (event.has_value()) {
+                relay_event(*event);
+            } else {
+                break;
             }
-            if (has_event) {
-                PlatformEvent event = [&]() {
-                    unique_lock lock(mLock);
-                    PlatformEvent ev = tq.head();
-                    save_event_to_log(ev);
-                    tq.pop();
-                    return ev;
-                }();
+#else
+            PlatformEvent event;
+            if (pop_event_if_present(event)) {
                 relay_event(event);
             } else {
                 break;
             }
+#endif
         }
         if (!environment->output_frozen()) {
             push_time_to_next();
