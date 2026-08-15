@@ -164,6 +164,60 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, NextDecisionTimeThreadSafety) {
+  EXPECT_EQ(fm->next_decision_time(), 0);
+
+  KeyCode A = 10;
+  KeyCode B = 11;
+  fm->configure_key(fork_configure_key_fork, A, B, 1);
+
+  TestEvent pevent(100, A);
+
+  EXPECT_CALL(*environment, detail_of(testing::_))
+    .WillRepeatedly(testing::Return(A));
+  EXPECT_CALL(*environment, time_of(testing::_))
+    .WillRepeatedly(testing::Return(100));
+  EXPECT_CALL(*environment, press_p(testing::_))
+    .WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*environment, release_p(testing::_))
+    .WillRepeatedly(testing::Return(false));
+  EXPECT_CALL(*environment, ignore_event(testing::_))
+    .WillRepeatedly(testing::Return(false));
+  EXPECT_CALL(*environment, output_frozen())
+    .WillRepeatedly(testing::Return(false));
+
+  Time next_time = fm->accept_event(pevent);
+  EXPECT_GT(next_time, 0);
+  EXPECT_EQ(fm->next_decision_time(), next_time);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, FlushToNextLocking) {
+  TestEvent pevent(100, 56);
+
+  int relay_calls = 0;
+  EXPECT_CALL(*environment, relay_event(testing::_))
+    .WillOnce([&relay_calls](const TestEvent&) {
+      relay_calls++;
+    });
+  EXPECT_CALL(*environment, detail_of(testing::_))
+    .WillRepeatedly(testing::Return(56));
+  EXPECT_CALL(*environment, time_of(testing::_))
+    .WillRepeatedly(testing::Return(100));
+  EXPECT_CALL(*environment, press_p(testing::_))
+    .WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*environment, release_p(testing::_))
+    .WillRepeatedly(testing::Return(false));
+  EXPECT_CALL(*environment, output_frozen())
+    .WillRepeatedly(testing::Return(false));
+
+  fm->accept_event(pevent);
+  EXPECT_EQ(relay_calls, 1);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 

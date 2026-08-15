@@ -74,15 +74,8 @@ private:
 #ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
     using  scoped_lock = std::scoped_lock<std::mutex>;
+    using  unique_lock = std::unique_lock<std::mutex>;
 
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
     static void check_locked() {/* assert(mLock.locked); */}
 #else
     int mLock = 0;
@@ -95,9 +88,13 @@ private:
             UNUSED(m);
         };
 
+        void lock() {}
+        void unlock() {}
+
         ~empty_scoped_lock() {}
     };
     using  scoped_lock = empty_scoped_lock<int>;
+    using  unique_lock = empty_scoped_lock<int>;
 
     void lock() const {};
     void unlock() const {};
@@ -955,24 +952,11 @@ private:
 
 
     // can modify the event!
-    void relay_event(const PlatformEvent& event) {
-        // (ORDER) this event must be delivered before any other!
-        // so no preemption of this part!  Are we re-entrant?
-        // yet, the next plugin could call in here? to do what?
-
-        // machine. fixme: it's not true -- it cannot!
-        // 2020: it can!
-        // so ... this is front_lock?
-
-        // why unlock during this? maybe also during the push_time_to_next then?
-        // because it can call into back to us? NotifyThaw()
-
-        // fixme: was here a bigger message?
-        // bug: environment->fmt_event(ev->p_event);
-        do_unlock();
-        // we must gurantee ORDER
+    void relay_event(unique_lock& lock, const PlatformEvent& event) {
+        // Unlocks during environment call to allow re-entrancy, then relocks.
+        lock.unlock();
         environment->relay_event(event);
-        do_lock();
+        lock.lock();
     };
 
 
@@ -983,18 +967,14 @@ private:
      *queue. Unlocks to be re-entrant!
      **/
     void flush_to_next() {
+        unique_lock lock(mLock);
         while (!environment->output_frozen() && tq.can_pop()) {
-            scoped_lock lock(mLock);
-            const PlatformEvent& event = tq.head(); // copy ?
-            // fixme ... temporarily ... not pop before sending off !
+            PlatformEvent event = tq.pop();
             save_event_to_log(event);
-            // unlocks!
-            // todo: should extract the platformEvent, then pop, and deliver.
-            tq.pop();
-            relay_event(event);
+            relay_event(lock, event);
         }
         if (!environment->output_frozen()) {
-            push_time_to_next();
+            push_time_to_next(lock);
         }
 #if 0
         if (!tq.can_pop())
@@ -1002,7 +982,7 @@ private:
 #endif
     }
 
-    void push_time_to_next() {
+    void push_time_to_next(unique_lock& lock) {
         // send out time:
 
         // interesting: after handing over, the nextPlugin might need to be refreshed.
@@ -1019,14 +999,17 @@ private:
         }
 
         if (now) {
+            lock.unlock();
             // this can thaw, freeze,?
             environment->push_time(now);
+            lock.lock();
         }
     }
 
-    // fixme: returned by the accept_* public API methods
+public:
+    // returned by the accept_* public API methods
     [[nodiscard]] Time next_decision_time() const {
-        // bug: not locked
+        scoped_lock lock(mLock);
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
