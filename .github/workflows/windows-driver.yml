@@ -31,6 +31,17 @@ jobs:
             Write-Host "Adding WDK tools directory to PATH: $dir"
             Add-Content -Path $env:GITHUB_PATH -Value $dir
           }
+          $dlls = Get-ChildItem -Path "windows\packages", "C:\Program Files (x86)\Windows Kits\10" -Filter "InfVerif.dll" -Recurse -ErrorAction SilentlyContinue
+          foreach ($dll in $dlls) {
+            $dir = $dll.DirectoryName
+            $parentDir = Split-Path -Path $dir -Parent
+            Write-Host "Adding InfVerif DLL directory to PATH: $dir"
+            Add-Content -Path $env:GITHUB_PATH -Value $dir
+            if ($parentDir) {
+              Write-Host "Adding InfVerif parent directory to PATH: $parentDir"
+              Add-Content -Path $env:GITHUB_PATH -Value $parentDir
+            }
+          }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
