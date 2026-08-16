@@ -48,7 +48,7 @@ jobs:
 
       - name: Build Driver (Unsigned)
         run: |
-          msbuild windows\sys\kbfiltr.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:EnableInf2Cat=false /p:EnableInfVerif=false /p:VisualStudioVersion=17.0
+          msbuild windows\sys\kbfiltr.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:EnableInf2Cat=false /p:EnableInfVerif=false /p:ApiValidator_Enable=false /p:RunApiValidator=false /p:VisualStudioVersion=17.0
 
       - name: Build Test App
         run: |
