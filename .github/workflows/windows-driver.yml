@@ -15,6 +15,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install WDK
+        shell: pwsh
+        run: |
+          winget install --id Microsoft.WindowsWDK --accept-package-agreements --accept-source-agreements --disable-interactivity
+          $vsixPath = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\Vsix" -Filter "WDK.vsix" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if ($vsixPath) {
+            Write-Host "Installing WDK VSIX extension from $vsixPath..."
+            & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\VSIXInstaller.exe" /quiet /admin $vsixPath
+          } else {
+            Write-Host "WDK VSIX extension not found."
+          }
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
