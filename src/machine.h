@@ -210,7 +210,7 @@ public:
             va_list argptr;
             va_start(argptr, fmt);
 #ifdef KERNEL
-            environment->vlog(format, argptr);
+            environment->vlog(fmt, argptr);
 #else
             // does MS/kernel have alloca?
             char buf[strlen(fmt) + 2];  // VLA, +1 for space, +1 for \0
