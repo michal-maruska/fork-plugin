@@ -164,6 +164,38 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, LockingAndStateTransitions) {
+  KeyCode A = 10;
+  KeyCode F = 20;
+  config->debug = 0;
+  fm->configure_key(fork_configure_key_fork, A, F, 1);
+
+  // Set expectations on environment during transitions
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, detail_of(testing::_)).WillRepeatedly(Return(A));
+  EXPECT_CALL(*environment, time_of(testing::_)).WillRepeatedly(Return(100));
+  EXPECT_CALL(*environment, press_p(testing::_)).WillRepeatedly(Return(true));
+  EXPECT_CALL(*environment, release_p(testing::_)).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, ignore_event(testing::_)).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, relay_event(testing::_)).Times(testing::AnyNumber());
+  EXPECT_CALL(*environment, push_time(testing::_)).Times(testing::AnyNumber());
+
+  TestEvent eventA(100, A, true);
+
+  // Test accept_event -> run_automaton -> next_decision_time without deadlocks
+  Time next = fm->accept_event(eventA);
+  EXPECT_GT(next, 0);
+
+  // Test accept_time
+  Time next_time = fm->accept_time(105);
+  EXPECT_EQ(next, next_time);
+
+  // Test accept_confirmation (forces fork processing without deadlock)
+  fm->accept_confirmation();
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 
