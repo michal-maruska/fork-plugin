@@ -22,6 +22,16 @@ jobs:
         run: |
           nuget restore windows\packages.config -PackagesDirectory windows\packages
 
+      - name: Add WDK Tools to PATH
+        shell: pwsh
+        run: |
+          $tools = Get-ChildItem -Path "windows\packages", "C:\Program Files (x86)\Windows Kits\10" -Filter "stampinf.exe" -Recurse -ErrorAction SilentlyContinue
+          foreach ($tool in $tools) {
+            $dir = $tool.DirectoryName
+            Write-Host "Adding WDK tools directory to PATH: $dir"
+            Add-Content -Path $env:GITHUB_PATH -Value $dir
+          }
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
