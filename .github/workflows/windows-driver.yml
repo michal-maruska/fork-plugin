@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout repository
@@ -27,11 +27,11 @@ jobs:
 
       - name: Build Driver (Unsigned)
         run: |
-          msbuild windows\sys\kbfiltr.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off
+          msbuild windows\sys\kbfiltr.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:VisualStudioVersion=17.0
 
       - name: Build Test App
         run: |
-          msbuild windows\exe\kbftest.vcxproj /p:Configuration=Release /p:Platform=x64
+          msbuild windows\exe\kbftest.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VisualStudioVersion=17.0
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
