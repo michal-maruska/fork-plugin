@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -160,6 +161,33 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConcurrentAccess) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, detail_of(testing::_)).WillRepeatedly(Return(30));
+  EXPECT_CALL(*environment, time_of(testing::_)).WillRepeatedly(Return(100));
+  EXPECT_CALL(*environment, press_p(testing::_)).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, release_p(testing::_)).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, relay_event(testing::_)).Times(AnyNumber());
+
+  std::thread thread1([this]() {
+    for (int i = 0; i < 1000; ++i) {
+      TestEvent pevent(100 + i, 30, false);
+      fm->accept_event(pevent);
+    }
+  });
+
+  std::thread thread2([this]() {
+    for (int i = 0; i < 1000; ++i) {
+      fm->accept_time(100 + i);
+    }
+  });
+
+  thread1.join();
+  thread2.join();
 
   Mock::VerifyAndClearExpectations(environment);
 }
