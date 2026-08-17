@@ -13,8 +13,8 @@
 #include "platform.h"
 #include "colors.h"
 
-#include <mutex>
 #ifndef DISABLE_STD_LIBRARY
+#include <mutex>
 // a couple of unique_ptr
 #include <memory>
 #include <algorithm>
@@ -72,9 +72,24 @@ public:
 
 private:
 
+#ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
     using unique_lock = std::unique_lock<std::mutex>;
     using lock_guard = std::lock_guard<std::mutex>;
+#else
+    struct dummy_mutex {
+        void lock() const {}
+        void unlock() const {}
+    };
+    mutable dummy_mutex mLock;
+
+    struct lock_guard {
+        explicit lock_guard(const dummy_mutex&) {}
+    };
+    struct unique_lock {
+        explicit unique_lock(const dummy_mutex&) {}
+    };
+#endif
 
     void check_locked() const {}
 
