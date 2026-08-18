@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -160,6 +161,42 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConcurrentLocking) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, push_time).WillRepeatedly([](Time t){ (void)t; });
+
+  std::thread t1([this]() {
+    for (int i = 1; i <= 100; ++i) {
+      fm->accept_time(i * 10);
+      fm->configure_key(fork_configure_key_fork, 10, 11, 1);
+    }
+  });
+
+  std::thread t2([this]() {
+    for (int i = 1; i <= 100; ++i) {
+      (void)fm->next_decision_time();
+      fm->configure_key(fork_configure_key_fork, 10, 12, 1);
+    }
+  });
+
+  t1.join();
+  t2.join();
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, BackwardsTimeDoesNotDeadlock) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, push_time).WillRepeatedly([](Time t){ (void)t; });
+
+  fm->accept_time(100);
+  // Time backwards should return without deadlock
+  Time t = fm->accept_time(50);
+  EXPECT_EQ(t, 0);
 
   Mock::VerifyAndClearExpectations(environment);
 }
