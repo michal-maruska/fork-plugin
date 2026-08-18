@@ -1,3 +1,36 @@
+fork-plugin (3.1.5) unstable; urgency=medium
+
+  [ Michal Maruska ]
+  * update ci script
+  * ci/run -- add build dependencies
+  * .ci/run  conditional install, build in 1 build dir
+  * ci/ru: cmake: color from outside
+  * ci/run invoke also run-clang-tidy
+  * fix(ci/run): test without changing directory
+  * ci: also cppcheck
+  * ci: relax some checks
+  * ci: cppcheck: be aware of googletest macros
+  * ci: run the static-analysis tools with  set -x
+  * ci: less checks on the test-machine
+  * ci: new pr-checks to invoke .ci/run
+  * .ci/run: document & fix
+  * ci (pr-checks): invoke manually if needed
+  * ci (pr-checks): fix dependencies
+  * ci (pr-checks): fix dependencies -- gtest, gmock
+  * ci (pr-checks): add dependencies to build for Xorg & libinput
+  * ci (pr-checks): run on my sid container -- sudo/builder
+  * use debian info for the dependencies
+  * ci(pr-checks): install clang explicitly
+  * ci(pr-checks): install clang-rt ??
+  * ci: build on github, in my organization
+  * ci: build the tagged commit when triggered by sid/ tag
+  * docs: link to Mac sdk
+
+  [ MichalMaruska ]
+  * Clean up locking: use unique_lock
+
+ -- Michal Maruska <mmaruska@gmail.com>  Wed, 19 Aug 2026 00:33:39 +0200
+
 fork-plugin (3.1.4) unstable; urgency=medium
 
   * docs: compare with qmk
