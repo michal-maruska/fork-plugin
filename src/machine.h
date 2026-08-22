@@ -79,7 +79,7 @@ private:
 
     static void check_locked() {}
 #else
-    int mLock = 0;
+    mutable int mLock = 0;
 
     using  unique_lock = empty_unique_lock<int>;
 
