@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
+#include <vector>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -160,6 +162,31 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConcurrentConfigure) {
+  constexpr int num_threads = 4;
+  constexpr int iterations = 100;
+  std::vector<std::thread> threads;
+
+  for (int t = 0; t < num_threads; ++t) {
+    threads.emplace_back([this, t]() {
+      for (int i = 0; i < iterations; ++i) {
+        KeyCode key = static_cast<KeyCode>((t * 10 + i) % 100 + 1);
+        KeyCode mapped = static_cast<KeyCode>(key + 10);
+        fm->configure_key(fork_configure_key_fork, key, mapped, 1);
+        fm->configure_twins(fork_configure_total_limit, key, mapped, 50, 1);
+        fm->configure_global(fork_configure_repeat_limit, 200, 1);
+        fm->set_debug(0);
+      }
+    });
+  }
+
+  for (auto& th : threads) {
+    th.join();
+  }
 
   Mock::VerifyAndClearExpectations(environment);
 }

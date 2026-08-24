@@ -16,6 +16,8 @@
 
 #ifndef DISABLE_STD_LIBRARY
 #include <mutex>
+#include <atomic>
+#include <thread>
 // a couple of unique_ptr
 #include <memory>
 #include <algorithm>
@@ -74,25 +76,47 @@ public:
 private:
 
 #ifndef DISABLE_STD_LIBRARY
-    mutable std::mutex mLock;
-    using  unique_lock = std::unique_lock<std::mutex>;
+    class machine_mutex {
+        mutable std::mutex m_;
+        mutable std::atomic<std::thread::id> owner_{};
+    public:
+        void lock() const {
+            m_.lock();
+            owner_.store(std::this_thread::get_id(), std::memory_order_relaxed);
+        }
+        void unlock() const {
+            owner_.store(std::thread::id{}, std::memory_order_relaxed);
+            m_.unlock();
+        }
+        bool try_lock() const {
+            if (m_.try_lock()) {
+                owner_.store(std::this_thread::get_id(), std::memory_order_relaxed);
+                return true;
+            }
+            return false;
+        }
+        [[nodiscard]] bool is_locked() const noexcept {
+            return owner_.load(std::memory_order_relaxed) == std::this_thread::get_id();
+        }
+    };
 
-    void do_lock() const
-    {
-        mLock.lock();
+    mutable machine_mutex mLock;
+    using unique_lock = std::unique_lock<machine_mutex>;
+
+    void check_locked() const {
+        assert(mLock.is_locked());
     }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
-    static void check_locked() {/* assert(mLock.locked); */}
 #else
-    int mLock = 0;
+    struct dummy_mutex {
+        void lock() const {}
+        void unlock() const {}
+        bool try_lock() const { return true; }
+        [[nodiscard]] bool is_locked() const noexcept { return true; }
+    };
 
-    using  unique_lock = empty_unique_lock<int>;
+    mutable dummy_mutex mLock;
+    using unique_lock = empty_unique_lock<dummy_mutex>;
 
-    void lock() const {};
-    void unlock() const {};
     void check_locked() const {}
 #endif
 
@@ -1067,6 +1091,7 @@ public:
     };
 
     int configure_twins(int type, Keycode key, Keycode twin, int value, bool set) {
+        unique_lock lock(mLock);
 #if VERIFICATION_MATRIX
         switch (type) {
         case fork_configure_total_limit:
@@ -1098,6 +1123,7 @@ public:
         key_repeat,                 // true/false
     };
     int configure_key(int type, Keycode key, int value, bool set) {
+        unique_lock lock(mLock);
         mdb("%s: keycode %d -> value %d, function %d\n",
             __func__, key, value, type);
 
