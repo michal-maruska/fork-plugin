@@ -76,25 +76,24 @@ private:
 #ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
     using  unique_lock = std::unique_lock<std::mutex>;
+#else
+    int mLock = 0;
+    using  unique_lock = empty_unique_lock<int>;
+#endif
 
     void do_lock() const
     {
+#ifndef DISABLE_STD_LIBRARY
         mLock.lock();
+#endif
     }
     void do_unlock() const
     {
+#ifndef DISABLE_STD_LIBRARY
         mLock.unlock();
-    }
-    static void check_locked() {/* assert(mLock.locked); */}
-#else
-    int mLock = 0;
-
-    using  unique_lock = empty_unique_lock<int>;
-
-    void lock() const {};
-    void unlock() const {};
-    void check_locked() const {}
 #endif
+    }
+    void check_locked() const {}
 
 
 
@@ -498,6 +497,7 @@ private:
      */
     void change_state(const fork_state_t new_state)
     {
+        check_locked();
         state = new_state;
 // #if ANSI_COLOR
         mdb(" --->%s[%dm%s%s\n", escape_sequence, 32 + new_state,
@@ -506,6 +506,7 @@ private:
 
     // only the `release'
     void record_last_release_event(const PlatformEvent &pevent) {
+        check_locked();
         last_released = environment->detail_of(pevent);
         last_released_time = environment->time_of(pevent);
     }
@@ -513,6 +514,7 @@ private:
     // is mDecision_time always recalculated?
     // possibly unlocks
     void apply_event_to_normal(const PlatformEvent &pevent) {
+        check_locked();
 
         const Keycode key = environment->detail_of(pevent);
         const Time simulated_time = environment->time_of(pevent);
@@ -615,6 +617,7 @@ private:
      *        here
      */
     void apply_event_to_suspect(const PlatformEvent &pevent) {
+        check_locked();
         assert(state == st_suspect);
 
         const Time simulated_time = environment->time_of(pevent);
@@ -702,6 +705,7 @@ private:
      * We wait only for time, and for the release of the key
      */
     void apply_event_to_verify_state(const PlatformEvent &pevent) {
+        check_locked();
         const Time simulated_time = environment->time_of(pevent);
         const Keycode key = environment->detail_of(pevent);
 
@@ -873,6 +877,7 @@ private:
      * low-level machine step.
      */
     void transition_by_force() {
+      check_locked();
       if (state == st_normal) {
         // so (tq.middle_empty())
         return;
@@ -894,43 +899,25 @@ private:
      */
 
     /**
-     * Take from `input_queue', + the mCurrent_time + force  -> run the machine.
+     * Internal automaton stepper called when machine lock is already held.
      */
-    void run_automaton(bool force_also) {
-        // fixme: maybe All I need is the nextPlugin?
-        {
-            unique_lock lock(mLock);
-#if 0
-            if (environment->output_frozen() || (! tq.middle_empty() )) {
-                // log_queues_and_nextplugin(message)
-                mdb("%s: next %sfrozen: internal %d, input: %d\n", __func__,
-                    (environment->output_frozen()?"":"NOT "),
-                    internal_queue.length(),
-                    input_queue.length());
-            }
-#endif
-            // notice that instead of recursion, all the calls to `rewind_machine' are
-            // followed by return to this cycle!
-            while (! environment->output_frozen()) {
+    void run_automaton_locked(bool force_also) {
+        check_locked();
+        while (! environment->output_frozen()) {
 
-                if (! tq.third_empty()) {
-                    const PlatformEvent& event = tq.peek_third();
-                    transition_by_key(event); // here crash?
+            if (! tq.third_empty()) {
+                const PlatformEvent& event = tq.peek_third();
+                transition_by_key(event);
+            } else {
+                if ((state != st_normal) && mCurrent_time) {
+                    if (transition_by_time(mCurrent_time))
+                        continue;
+                }
+
+                if (force_also && (state != st_normal)) {
+                    transition_by_force();
                 } else {
-                    if ((state != st_normal) && mCurrent_time) {
-                        // !middle_empty()
-                        if (transition_by_time(mCurrent_time))
-                            // If this time helped to decide -> machine rewound,
-                            // we have to try again, maybe the queue is not empty?.
-                            continue;
-                    }
-
-                    if (force_also && (state != st_normal)) {
-                        // !middle_empty()
-                        transition_by_force();
-                    } else {
-                        break;
-                    }
+                    break;
                 }
             }
         }
@@ -938,6 +925,17 @@ private:
         if (config->debug) {
             log_queues("Before flushing:");
         }
+    }
+
+    /**
+     * Take from `input_queue', + the mCurrent_time + force  -> run the machine.
+     */
+    void run_automaton(bool force_also) {
+        {
+            unique_lock lock(mLock);
+            run_automaton_locked(force_also);
+        }
+
         // unlocked now, why?
         flush_to_next();
     };
@@ -1039,15 +1037,19 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+    [[nodiscard]] Time next_decision_time_unlocked() const {
+        check_locked();
         if ((state == st_verify)
             || (state == st_suspect))
-            // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
     }
 
 
@@ -1067,6 +1069,7 @@ public:
     };
 
     int configure_twins(int type, Keycode key, Keycode twin, int value, bool set) {
+        unique_lock lock(mLock);
 #if VERIFICATION_MATRIX
         switch (type) {
         case fork_configure_total_limit:
@@ -1098,6 +1101,7 @@ public:
         key_repeat,                 // true/false
     };
     int configure_key(int type, Keycode key, int value, bool set) {
+        unique_lock lock(mLock);
         mdb("%s: keycode %d -> value %d, function %d\n",
             __func__, key, value, type);
 
@@ -1302,7 +1306,7 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;
