@@ -77,22 +77,13 @@ private:
     mutable std::mutex mLock;
     using  unique_lock = std::unique_lock<std::mutex>;
 
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
     static void check_locked() {/* assert(mLock.locked); */}
 #else
-    int mLock = 0;
+    struct empty_mutex {};
+    mutable empty_mutex mLock;
 
-    using  unique_lock = empty_unique_lock<int>;
+    using  unique_lock = empty_unique_lock<empty_mutex>;
 
-    void lock() const {};
-    void unlock() const {};
     void check_locked() const {}
 #endif
 
@@ -1039,15 +1030,20 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+    // Internal helper when mLock is already held by caller
+    [[nodiscard]] Time next_decision_time_unlocked() const {
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+    // Public API method
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
     }
 
 
@@ -1067,6 +1063,7 @@ public:
     };
 
     int configure_twins(int type, Keycode key, Keycode twin, int value, bool set) {
+        unique_lock lock(mLock);
 #if VERIFICATION_MATRIX
         switch (type) {
         case fork_configure_total_limit:
@@ -1098,6 +1095,7 @@ public:
         key_repeat,                 // true/false
     };
     int configure_key(int type, Keycode key, int value, bool set) {
+        unique_lock lock(mLock);
         mdb("%s: keycode %d -> value %d, function %d\n",
             __func__, key, value, type);
 
@@ -1302,7 +1300,7 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;

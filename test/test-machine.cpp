@@ -161,6 +161,28 @@ TEST_F(machineTest, Configure) {
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
 
+  fm->configure_twins(fork_configure_total_limit, A, B, 150, true);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, AcceptTimeBackwardsDoesNotDeadlock) {
+  TestEvent pevent(100L, 56);
+  EXPECT_CALL(*environment, relay_event);
+  EXPECT_CALL(*environment, detail_of(testing::_)).WillRepeatedly(testing::Return(56));
+  EXPECT_CALL(*environment, time_of).WillRepeatedly(testing::Return(100));
+  EXPECT_CALL(*environment, press_p).WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*environment, release_p).WillRepeatedly(testing::Return(false));
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+
+  fm->accept_event(pevent);
+
+  // Send a timestamp backwards: mCurrent_time > 50 when mCurrent_time was previously set or updated
+  fm->accept_time(200);
+  // Now pass backward time 50
+  Time decision = fm->accept_time(50);
+  EXPECT_EQ(decision, 0);
+
   Mock::VerifyAndClearExpectations(environment);
 }
 
