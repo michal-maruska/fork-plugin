@@ -75,25 +75,10 @@ private:
 
 #ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
-    using  unique_lock = std::unique_lock<std::mutex>;
-
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
-    static void check_locked() {/* assert(mLock.locked); */}
+    using lock_guard = std::lock_guard<std::mutex>;
 #else
     int mLock = 0;
-
-    using  unique_lock = empty_unique_lock<int>;
-
-    void lock() const {};
-    void unlock() const {};
-    void check_locked() const {}
+    using lock_guard = empty_unique_lock<int>;
 #endif
 
 
@@ -266,7 +251,7 @@ public:
      * @value .. either parameter is set to this value if @set is 1
      * or ... ignored  */
     int configure_global(fork_configuration_t type, int value, bool set) {
-        unique_lock lock(mLock);
+        lock_guard lock(mLock);
         const auto fork_configuration =
 #ifndef DISABLE_STD_LIBRARY
             this->config.get()
@@ -353,20 +338,19 @@ public:
     }
 
     void set_debug(int level) {
-        unique_lock lock(mLock);
+        lock_guard lock(mLock);
         config->debug = level;
         // (machine->config->debug? 0: 1);
     }
 
     void stop() {
         // wait & stop
-        unique_lock wait_lock(mLock);
+        lock_guard wait_lock(mLock);
     }
 
 
 private:
     void set_last_events_count(const int new_max) {
-        check_locked();
         mdb("%s: allocating %d events\n", __func__, new_max);
 
         if (max_last > new_max) {
@@ -430,7 +414,6 @@ private:
     // /----internal--queue--/ event /----input event----/
     //  ^ suspect                ^ confirmation.
     void do_confirm_non_fork_by(fork_reason_t reason) {
-        check_locked();
         UNUSED(reason);
         assert(state == st_suspect || state == st_verify);
 
@@ -442,7 +425,6 @@ private:
      * One key-event investigation finished,
      * now reset for the next one */
     void rewind_machine() {
-        check_locked();
         /* reset the machine */
         change_state(st_normal);
         suspect = no_key;
@@ -462,7 +444,6 @@ private:
     */
     void activate_fork_rewind(fork_reason_t fork_reason) {
         UNUSED(fork_reason);
-        check_locked();
 
         // assert()
         if (tq.middle_empty()) {
@@ -769,7 +750,6 @@ private:
      *   the head of internal_queue may be pushed to the output-queue as well.
      */
    void transition_by_key(const PlatformEvent& pevent) {
-        check_locked();
         const Keycode key = environment->detail_of(pevent);
 
         mdb("%s: %lu\n", __func__, key);
@@ -841,7 +821,6 @@ private:
        machine->mDecision_time   ... for another timer.
     */
     bool transition_by_time(Time current_time) {
-      check_locked();
       // confirm fork:
 #if 0
       mdb("%s%s%s state: %s, queue: %d, time: %u key: %d\n", fork_color,
@@ -899,7 +878,7 @@ private:
     void run_automaton(bool force_also) {
         // fixme: maybe All I need is the nextPlugin?
         {
-            unique_lock lock(mLock);
+            lock_guard lock(mLock);
 #if 0
             if (environment->output_frozen() || (! tq.middle_empty() )) {
                 // log_queues_and_nextplugin(message)
@@ -959,7 +938,7 @@ private:
 
 #ifndef DISABLE_STD_LIBRARY
     [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present() {
-        unique_lock lock(mLock);
+        lock_guard lock(mLock);
         if (tq.can_pop()) {
             PlatformEvent ev = tq.head();
             save_event_to_log(ev);
@@ -970,7 +949,7 @@ private:
     }
 #else
     bool pop_event_if_present(PlatformEvent& out_event) {
-        unique_lock lock(mLock);
+        lock_guard lock(mLock);
         if (tq.can_pop()) {
             out_event = tq.head();
             save_event_to_log(out_event);
@@ -1022,7 +1001,7 @@ private:
 
         Time now;
         {
-            unique_lock lock(mLock);
+            lock_guard lock(mLock);
             const PlatformEvent *item = tq.first();
             if (item == nullptr) {
                 now = mCurrent_time;
@@ -1041,7 +1020,7 @@ private:
 
     // fixme: returned by the accept_* public API methods
     [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+        lock_guard lock(mLock);
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
@@ -1067,6 +1046,7 @@ public:
     };
 
     int configure_twins(int type, Keycode key, Keycode twin, int value, bool set) {
+        lock_guard lock(mLock);
 #if VERIFICATION_MATRIX
         switch (type) {
         case fork_configure_total_limit:
@@ -1098,6 +1078,7 @@ public:
         key_repeat,                 // true/false
     };
     int configure_key(int type, Keycode key, int value, bool set) {
+        lock_guard lock(mLock);
         mdb("%s: keycode %d -> value %d, function %d\n",
             __func__, key, value, type);
 
@@ -1121,8 +1102,7 @@ public:
     /** ask the platform environment to send events as data. */
     int dump_last_events_to_client(event_publisher<archived_event_t>* publisher, int max_requested) {
         // I don't need to count them! last_events_count
-        // should be locked
-        unique_lock lock(mLock);
+        lock_guard lock(mLock);
         int queue_count = last_events_log.size();
 
         if (max_requested > queue_count) {
@@ -1156,7 +1136,7 @@ public:
         @return false if allocation  failed.
     */
     bool create_configs() {
-        unique_lock lock(mLock);
+        lock_guard lock(mLock);
 
         environment->log("%s\n", __func__);
 
@@ -1187,7 +1167,7 @@ public:
     }
 
     void dump_last_events(event_dumper<archived_event_t>* dumper) const {
-        unique_lock lock(mLock);
+        lock_guard lock(mLock);
 #if DISABLE_STD_LIBRARY
 #if 0
         std::function<void(const event_dumper&, const archived_event_t&)> doit0 = &event_dumper::operator();
@@ -1247,7 +1227,7 @@ public:
      */
     Time accept_event(const PlatformEvent& pevent) noexcept(false) {
         {
-            unique_lock lock(mLock);
+            lock_guard lock(mLock);
             const Keycode key = environment->detail_of(pevent);
 #if 0
             environment->fmt_event(__func__, pevent);
@@ -1296,7 +1276,7 @@ public:
 
     Time accept_time(const Time now) {
         {
-            unique_lock lock(mLock);
+            lock_guard lock(mLock);
             /* push the time ! */
             // sometimes now is 0 -- when I ungrab-keyboard from sfc.
             if (mCurrent_time > now) {
