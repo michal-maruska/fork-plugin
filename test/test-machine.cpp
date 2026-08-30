@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
+#include <vector>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -117,13 +119,8 @@ protected:
 
   ~machineTest()
   {
-    // machine `owns' this:
-    // config = nullptr;
-    // so don't do this:
-    // delete config;
-
+    // machine owns `config` and `environment` via std::unique_ptr
     delete fm;
-    delete environment;
   }
 
   testEnvironment *environment;
@@ -162,6 +159,56 @@ TEST_F(machineTest, Configure) {
   EXPECT_EQ(config->fork_keycode[A], B);
 
   Mock::VerifyAndClearExpectations(environment);
+}
+
+class ConcreteTestEnvironment : public forkNS::platformEnvironment<KeyCode, Time,
+                                                                   test_archived_event,
+                                                                   TestEvent> {
+public:
+    bool press_p(const TestEvent& event) const override { return false; }
+    bool release_p(const TestEvent& event) const override { return true; }
+    Time time_of(const TestEvent& event) const override { return 100; }
+    KeyCode detail_of(const TestEvent& event) const override { return 20; }
+    bool ignore_event(const TestEvent &pevent) override { return false; }
+    bool output_frozen() override { return false; }
+    void relay_event(const TestEvent &pevent) const override {}
+    void push_time(Time now) override {}
+    void vlog(const char* format, va_list argptr) const override {}
+    void log(const char* format...) const override {}
+    void fmt_event(const char* message, const TestEvent &event) const override {}
+    void archive_event(test_archived_event& ae, const TestEvent& event) override {}
+    void free_event(TestEvent* pevent) const override {}
+    void rewrite_event(TestEvent& pevent, KeyCode code) override {}
+};
+
+using concreteMachineRec = forkNS::forkingMachine<KeyCode, Time,
+                                                  TestEvent, ConcreteTestEnvironment,
+                                                  test_archived_event, last_events_t>;
+
+TEST(machineConcurrentTest, ConcurrentLocking) {
+  auto env = new ConcreteTestEnvironment();
+  auto fm = std::make_unique<concreteMachineRec>(env);
+  auto cfg = std::make_unique<concreteMachineRec::fork_configuration>();
+  cfg->debug = 0;
+  fm->config = std::move(cfg);
+
+  std::vector<std::thread> threads;
+  for (int i = 0; i < 4; ++i) {
+    threads.emplace_back([&fm, i]() {
+      for (int j = 0; j < 20; ++j) {
+        fm->configure_key(fork_configure_key_fork, 10 + (i % 5), 20 + (i % 5), 1);
+        fm->configure_global(fork_configure_repeat_limit, 200 + j, true);
+        TestEvent pevent(100 + j, 20);
+        fm->accept_event(pevent);
+        fm->accept_time(100 + j);
+        fm->accept_confirmation();
+      }
+    });
+  }
+
+  for (auto& t : threads) {
+    t.join();
+  }
 }
 
 #if 0
