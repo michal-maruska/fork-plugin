@@ -76,23 +76,11 @@ private:
 #ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
     using  unique_lock = std::unique_lock<std::mutex>;
-
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
-    static void check_locked() {/* assert(mLock.locked); */}
+    void check_locked() const {}
 #else
-    int mLock = 0;
+    mutable int mLock = 0;
 
     using  unique_lock = empty_unique_lock<int>;
-
-    void lock() const {};
-    void unlock() const {};
     void check_locked() const {}
 #endif
 
@@ -379,17 +367,10 @@ private:
     }
 
     void save_event_to_log(const PlatformEvent& event) {
-        // could I emplace it?
-        // reference = last_events_log.emplace_back()
-        // reference.forked = ev->forked;
-        UNUSED(event);
-#if 0
-        archived_event_t archived_event;
-        environment->archive_event(archived_event, event->p_event);
-        archived_event.forked = event->original_keycode; // todo: rename original_keycode
-
+        archived_event_t archived_event{};
+        environment->archive_event(archived_event, event);
+        archived_event.forked = environment->detail_of(event);
         last_events_log.push_back(archived_event);
-#endif
     }
 
     bool forkable_p(Keycode code)
@@ -1067,6 +1048,7 @@ public:
     };
 
     int configure_twins(int type, Keycode key, Keycode twin, int value, bool set) {
+        unique_lock lock(mLock);
 #if VERIFICATION_MATRIX
         switch (type) {
         case fork_configure_total_limit:
@@ -1098,6 +1080,7 @@ public:
         key_repeat,                 // true/false
     };
     int configure_key(int type, Keycode key, int value, bool set) {
+        unique_lock lock(mLock);
         mdb("%s: keycode %d -> value %d, function %d\n",
             __func__, key, value, type);
 
@@ -1130,17 +1113,10 @@ public:
         };
 
         publisher->prepare(max_requested);
-#if DISABLE_STD_LIBRARY
-        std::function<void(const archived_event_t&)> lambda =
-            [publisher](const archived_event_t& ev){ publisher->event(ev); };
-        // auto f = std::function<void(const archived_event&)>(bind(publisher->event(), publisher,));
-
-        // todo:
-        // fixme: we need to increase an iterator .. pointer .... to the C array!
-        // last_events.
-        for_each(last_events_log.begin(),
-                 last_events_log.end(),
-                 lambda);
+#ifndef DISABLE_STD_LIBRARY
+        for (auto it = last_events_log.begin(); it != last_events_log.end(); ++it) {
+            publisher->event(*it);
+        }
 #endif
         mdb("sending %d events\n", max_requested);
 
@@ -1188,24 +1164,11 @@ public:
 
     void dump_last_events(event_dumper<archived_event_t>* dumper) const {
         unique_lock lock(mLock);
-#if DISABLE_STD_LIBRARY
-#if 0
-        std::function<void(const event_dumper&, const archived_event_t&)> doit0 = &event_dumper::operator();
-        // lambda?
-        std::function<void(const archived_event_t&)> doit = std::bind(&event_dumper::operator(), doit, placeholders::_1);
-#else
-        std::function<void(const archived_event_t&)> lambda = [dumper](const archived_event_t& ev){ dumper->operator()(ev); };
-#endif
-        if (last_events_log.full()) {
-            std::for_each(last_events_log.begin(),
-                          last_events_log.end(),
-                          lambda);
-        } else {
-            std::for_each(last_events_log.begin(),
-                          last_events_log.begin() + last_events_log.size(),
-                          lambda);
+#ifndef DISABLE_STD_LIBRARY
+        for (auto it = last_events_log.begin(); it != last_events_log.end(); ++it) {
+            (*dumper)(*it);
         }
-#endif // DISABLE_STD_LIBRARY
+#endif
     }
 
 private:
@@ -1295,6 +1258,7 @@ public:
 
 
     Time accept_time(const Time now) {
+        bool time_ok = true;
         {
             unique_lock lock(mLock);
             /* push the time ! */
@@ -1302,10 +1266,14 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                time_ok = false;
             }
             else
                 mCurrent_time = now;
+        }
+
+        if (!time_ok) {
+            return next_decision_time();
         }
 
         run_automaton(false);

@@ -16,25 +16,14 @@ extern "C" {
 // let's make one without any:
 template <typename event>
 class empty_last_events_t
-#ifndef KERNEL
-  : std::vector<event>
-#endif
 {
 public:
-    // override:
-    static
-    void push_back(const event& __x) {}
-
-    // emplace_back()
-    static
-    void set_capacity(const int& n) {
-      UNREFERENCED_PARAMETER(n);
-    };
-
-    static
-    size_t size() {
-        return 0;
-    }
-
-  // bool full() const {return false;}
+    void push_back(const event& __x) { UNREFERENCED_PARAMETER(__x); }
+    void set_capacity(const int& n) { UNREFERENCED_PARAMETER(n); }
+    size_t size() const { return 0; }
+    bool full() const { return false; }
+    const event* begin() const { return nullptr; }
+    const event* end() const { return nullptr; }
+    event* begin() { return nullptr; }
+    event* end() { return nullptr; }
 };
