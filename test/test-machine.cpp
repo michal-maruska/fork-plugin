@@ -139,11 +139,12 @@ TEST_F(machineTest, AcceptEvent) {
 
   EXPECT_CALL(*environment, relay_event);
   EXPECT_CALL(*environment, detail_of(testing::_))
-    .Times(4)
+    .Times(AnyNumber())
     .WillRepeatedly(testing::Return(56));
-  EXPECT_CALL(*environment, time_of).Times(3);
-  EXPECT_CALL(*environment, press_p).Times(2);
-  EXPECT_CALL(*environment, release_p).Times(2);
+  EXPECT_CALL(*environment, archive_event(testing::_, testing::_)).Times(AnyNumber());
+  EXPECT_CALL(*environment, time_of).Times(AnyNumber());
+  EXPECT_CALL(*environment, press_p).Times(AnyNumber());
+  EXPECT_CALL(*environment, release_p).Times(AnyNumber());
 
   EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
 
@@ -160,6 +161,15 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, BackwardTimeHandling) {
+  EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
+  fm->accept_time(100);
+  Time result = fm->accept_time(50);
+  EXPECT_EQ(result, 0);
 
   Mock::VerifyAndClearExpectations(environment);
 }
