@@ -164,6 +164,30 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, AcceptTimeBackwardNoDeadlock) {
+  EXPECT_CALL(*environment, push_time(100)).Times(1);
+  EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
+
+  // Advance time to 100
+  fm->accept_time(100);
+
+  // Send backward time 50 (triggers time moved backwards logic).
+  // Before fix, this caused a deadlock on mLock.
+  Time decision = fm->accept_time(50);
+  EXPECT_EQ(decision, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConfigureTwins) {
+  KeyCode A = 10;
+  KeyCode B = 11;
+  int res = fm->configure_twins(fork_configure_total_limit, A, B, 150, true);
+  EXPECT_EQ(res, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 
