@@ -164,6 +164,53 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, AcceptTimeForksOnTimeout) {
+  KeyCode A = 10;
+  KeyCode F = 11;
+  Time a_time = 100;
+
+  fm->configure_key(fork_configure_key_fork, A, F, 1);
+
+  TestEvent A_pevent(a_time, A);
+
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, ignore_event(testing::_)).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, time_of(testing::_)).WillRepeatedly(Return(a_time));
+  EXPECT_CALL(*environment, detail_of(testing::_)).WillRepeatedly(Return(A));
+  EXPECT_CALL(*environment, press_p(testing::_)).WillRepeatedly(Return(true));
+  EXPECT_CALL(*environment, release_p(testing::_)).WillRepeatedly(Return(false));
+
+  Time decision_time = fm->accept_event(A_pevent);
+  EXPECT_GT(decision_time, a_time);
+
+  // Now call accept_time with time >= decision_time
+  EXPECT_CALL(*environment, rewrite_event(testing::_, F));
+  EXPECT_CALL(*environment, relay_event(testing::_));
+  EXPECT_CALL(*environment, push_time(decision_time));
+
+  Time next = fm->accept_time(decision_time);
+  EXPECT_EQ(next, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, AcceptTimeMovedBackwardsDoesNotDeadlock) {
+  // First set current time to 100
+  EXPECT_CALL(*environment, push_time(100));
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+
+  fm->accept_time(100);
+
+  // Now pass a time earlier than 100 (time moving backwards)
+  // This triggers the branch `if (mCurrent_time > now)` in `accept_time()`,
+  // which previously called `next_decision_time()` while holding `mLock`,
+  // causing a double-lock deadlock on std::mutex.
+  Time next = fm->accept_time(50);
+  EXPECT_EQ(next, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 
