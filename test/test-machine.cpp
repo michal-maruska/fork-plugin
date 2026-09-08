@@ -6,6 +6,9 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
+#include <vector>
+#include <atomic>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -160,6 +163,47 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConcurrentAccess) {
+  EXPECT_CALL(*environment, relay_event).Times(AnyNumber());
+  EXPECT_CALL(*environment, push_time).Times(AnyNumber());
+  EXPECT_CALL(*environment, detail_of(testing::_))
+    .WillRepeatedly(testing::Return(56));
+  EXPECT_CALL(*environment, time_of).WillRepeatedly(testing::Return(100L));
+  EXPECT_CALL(*environment, press_p).WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*environment, release_p).WillRepeatedly(testing::Return(false));
+  EXPECT_CALL(*environment, ignore_event).WillRepeatedly(testing::Return(false));
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+
+  std::atomic<bool> start_flag{false};
+  constexpr int num_threads = 4;
+  constexpr int iterations = 100;
+
+  std::vector<std::thread> threads;
+  for (int i = 0; i < num_threads; ++i) {
+    threads.emplace_back([this, &start_flag, i]() {
+      while (!start_flag) {
+        std::this_thread::yield();
+      }
+      for (int j = 0; j < iterations; ++j) {
+        if (i % 2 == 0) {
+          fm->accept_event(TestEvent(100L + j, 56));
+          fm->accept_time(100L + j);
+        } else {
+          fm->configure_key(fork_configure_key_fork, 10, 20, 1);
+          fm->configure_global(fork_configure_debug, j % 2, true);
+        }
+      }
+    });
+  }
+
+  start_flag = true;
+  for (auto& t : threads) {
+    t.join();
+  }
 
   Mock::VerifyAndClearExpectations(environment);
 }

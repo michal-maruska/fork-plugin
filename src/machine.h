@@ -77,22 +77,12 @@ private:
     mutable std::mutex mLock;
     using  unique_lock = std::unique_lock<std::mutex>;
 
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
     void check_locked() const {}
 #else
     int mLock = 0;
 
     using  unique_lock = empty_unique_lock<int>;
 
-    void lock() const {}
-    void unlock() const {}
     void check_locked() const {}
 #endif
 
@@ -1297,6 +1287,7 @@ public:
 
 
     Time accept_time(const Time now) {
+        bool time_backwards = false;
         {
             unique_lock lock(mLock);
             /* push the time ! */
@@ -1304,10 +1295,14 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                time_backwards = true;
             }
             else
                 mCurrent_time = now;
+        }
+
+        if (time_backwards) {
+            return next_decision_time();
         }
 
         run_automaton(false);
