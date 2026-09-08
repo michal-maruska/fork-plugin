@@ -887,7 +887,7 @@ private:
      * Take from `input_queue', + the mCurrent_time + force  -> run the machine.
      * Assumes mLock is already held by caller.
      */
-    void run_automaton_unlocked(bool force_also) {
+    void run_automaton_locked(bool force_also) {
         // notice that instead of recursion, all the calls to `rewind_machine' are
         // followed by return to this cycle!
         while (! environment->output_frozen()) {
@@ -916,12 +916,12 @@ private:
         if (config->debug) {
             log_queues("Before flushing:");
         }
-        flush_to_next_unlocked();
+        flush_to_next_locked();
     };
 
     void run_automaton(bool force_also) {
         unique_lock lock(mLock);
-        run_automaton_unlocked(force_also);
+        run_automaton_locked(force_also);
     }
 
 
@@ -940,7 +940,7 @@ private:
     };
 
 #ifndef DISABLE_STD_LIBRARY
-    [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present_unlocked() {
+    [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present_locked() {
         if (tq.can_pop()) {
             PlatformEvent ev = tq.head();
             save_event_to_log(ev);
@@ -952,10 +952,10 @@ private:
 
     [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present() {
         unique_lock lock(mLock);
-        return pop_event_if_present_unlocked();
+        return pop_event_if_present_locked();
     }
 #else
-    bool pop_event_if_present_unlocked(PlatformEvent& out_event) {
+    bool pop_event_if_present_locked(PlatformEvent& out_event) {
         if (tq.can_pop()) {
             out_event = tq.head();
             save_event_to_log(out_event);
@@ -967,7 +967,7 @@ private:
 
     bool pop_event_if_present(PlatformEvent& out_event) {
         unique_lock lock(mLock);
-        return pop_event_if_present_unlocked(out_event);
+        return pop_event_if_present_locked(out_event);
     }
 #endif
 
@@ -977,10 +977,10 @@ private:
      * The machine is locked here.  It also does not change state. Only the 1
      *queue. Unlocks to be re-entrant!
      **/
-    void flush_to_next_unlocked() {
+    void flush_to_next_locked() {
         while (!environment->output_frozen()) {
 #ifndef DISABLE_STD_LIBRARY
-            auto event = pop_event_if_present_unlocked();
+            auto event = pop_event_if_present_locked();
             if (event.has_value()) {
                 relay_event(*event);
             } else {
@@ -988,7 +988,7 @@ private:
             }
 #else
             PlatformEvent event;
-            if (pop_event_if_present_unlocked(event)) {
+            if (pop_event_if_present_locked(event)) {
                 relay_event(event);
             } else {
                 break;
@@ -996,7 +996,7 @@ private:
 #endif
         }
         if (!environment->output_frozen()) {
-            Time now = push_time_to_next_unlocked();
+            Time now = push_time_to_next_locked();
             if (now) {
                 environment->push_time(now);
             }
@@ -1005,10 +1005,10 @@ private:
 
     void flush_to_next() {
         unique_lock lock(mLock);
-        flush_to_next_unlocked();
+        flush_to_next_locked();
     }
 
-    [[nodiscard]] Time push_time_to_next_unlocked() {
+    [[nodiscard]] Time push_time_to_next_locked() {
         const PlatformEvent *item = tq.first();
         if (item == nullptr) {
             return mCurrent_time;
@@ -1028,7 +1028,7 @@ private:
         Time now;
         {
             unique_lock lock(mLock);
-            now = push_time_to_next_unlocked();
+            now = push_time_to_next_locked();
         }
 
         if (now) {
@@ -1037,7 +1037,7 @@ private:
         }
     }
 
-    [[nodiscard]] Time next_decision_time_unlocked() const {
+    [[nodiscard]] Time next_decision_time_locked() const {
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
@@ -1049,7 +1049,7 @@ private:
     // fixme: returned by the accept_* public API methods
     [[nodiscard]] Time next_decision_time() const {
         unique_lock lock(mLock);
-        return next_decision_time_unlocked();
+        return next_decision_time_locked();
     }
 
 
@@ -1276,9 +1276,9 @@ public:
             tq.push(pevent);
         }
 
-        run_automaton_unlocked(false);
+        run_automaton_locked(false);
 
-        return next_decision_time_unlocked();
+        return next_decision_time_locked();
     }
 
 
@@ -1289,13 +1289,13 @@ public:
         if (mCurrent_time > now) {
             // unconditionally:
             environment->log("%s: bug: time moved backwards!\n", __func__);
-            return next_decision_time_unlocked();
+            return next_decision_time_locked();
         }
         else
             mCurrent_time = now;
 
-        run_automaton_unlocked(false);
-        return next_decision_time_unlocked();
+        run_automaton_locked(false);
+        return next_decision_time_locked();
     }
 
     /** public api
