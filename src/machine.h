@@ -74,25 +74,64 @@ public:
 private:
 
 #ifndef DISABLE_STD_LIBRARY
-    mutable std::mutex mLock;
-    using  unique_lock = std::unique_lock<std::mutex>;
+    class MachineMutex {
+        mutable std::mutex mMutex;
+#ifndef NDEBUG
+        mutable bool mIsLocked{false};
+#endif
+    public:
+        MachineMutex() = default;
 
-    void do_lock() const
-    {
-        mLock.lock();
+        void lock() const {
+            mMutex.lock();
+#ifndef NDEBUG
+            mIsLocked = true;
+#endif
+        }
+
+        void unlock() const {
+#ifndef NDEBUG
+            mIsLocked = false;
+#endif
+            mMutex.unlock();
+        }
+
+        [[nodiscard]] bool is_locked() const {
+#ifndef NDEBUG
+            return mIsLocked;
+#else
+            return true;
+#endif
+        }
+    };
+
+    mutable MachineMutex mLock;
+
+    class unique_lock {
+        const MachineMutex* mMutexPtr;
+    public:
+        explicit unique_lock(const MachineMutex& m) : mMutexPtr(&m) {
+            mMutexPtr->lock();
+        }
+        ~unique_lock() {
+            if (mMutexPtr) {
+                mMutexPtr->unlock();
+            }
+        }
+        unique_lock(const unique_lock&) = delete;
+        unique_lock& operator=(const unique_lock&) = delete;
+    };
+
+    void check_locked() const {
+#ifndef NDEBUG
+        assert(mLock.is_locked());
+#endif
     }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
-    void check_locked() const {}
 #else
     int mLock = 0;
 
-    using  unique_lock = empty_unique_lock<int>;
+    using unique_lock = empty_unique_lock<int>;
 
-    void lock() const {}
-    void unlock() const {}
     void check_locked() const {}
 #endif
 
@@ -361,6 +400,7 @@ public:
     void stop() {
         // wait & stop
         unique_lock wait_lock(mLock);
+        UNUSED(wait_lock);
     }
 
 
@@ -1039,15 +1079,20 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+    [[nodiscard]] Time next_decision_time_unlocked() const {
+        check_locked();
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
     }
 
 
@@ -1304,7 +1349,7 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;

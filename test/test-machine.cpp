@@ -164,6 +164,13 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, TimeMovesBackwards) {
+  fm->accept_time(100);
+  // Time moving backwards should not deadlock or crash.
+  fm->accept_time(50);
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 
