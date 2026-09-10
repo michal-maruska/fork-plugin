@@ -16,6 +16,8 @@
 
 #ifndef DISABLE_STD_LIBRARY
 #include <mutex>
+#include <atomic>
+#include <thread>
 // a couple of unique_ptr
 #include <memory>
 #include <algorithm>
@@ -32,6 +34,49 @@
 #include "fork_configuration.h"
 
 namespace forkNS {
+
+#ifndef DISABLE_STD_LIBRARY
+class MachineMutex {
+    mutable std::mutex mMutex;
+    mutable std::atomic<std::thread::id> mOwner{std::thread::id()};
+
+public:
+    MachineMutex() = default;
+    ~MachineMutex() = default;
+
+    MachineMutex(const MachineMutex&) = delete;
+    MachineMutex& operator=(const MachineMutex&) = delete;
+
+    void lock() const {
+        mMutex.lock();
+        mOwner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+    }
+
+    void unlock() const {
+        mOwner.store(std::thread::id(), std::memory_order_relaxed);
+        mMutex.unlock();
+    }
+
+    bool try_lock() const {
+        if (mMutex.try_lock()) {
+            mOwner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+            return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool is_locked_by_current_thread() const noexcept {
+        return mOwner.load(std::memory_order_relaxed) == std::this_thread::get_id();
+    }
+};
+#else
+struct MachineMutex {
+    void lock() const {}
+    void unlock() const {}
+    bool try_lock() const { return true; }
+    [[nodiscard]] bool is_locked_by_current_thread() const noexcept { return true; }
+};
+#endif
 
 /**
  * Machine:
@@ -74,27 +119,23 @@ public:
 private:
 
 #ifndef DISABLE_STD_LIBRARY
-    mutable std::mutex mLock;
-    using  unique_lock = std::unique_lock<std::mutex>;
-
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
-    void check_locked() const {}
+    mutable MachineMutex mLock;
+    using unique_lock = std::unique_lock<MachineMutex>;
 #else
-    int mLock = 0;
-
-    using  unique_lock = empty_unique_lock<int>;
-
-    void lock() const {}
-    void unlock() const {}
-    void check_locked() const {}
+    mutable MachineMutex mLock;
+    using unique_lock = empty_unique_lock<MachineMutex>;
 #endif
+
+    void do_lock() const { mLock.lock(); }
+    void do_unlock() const { mLock.unlock(); }
+    void lock() const { do_lock(); }
+    void unlock() const { do_unlock(); }
+
+    void check_locked() const {
+#if !defined(NDEBUG)
+        assert(mLock.is_locked_by_current_thread());
+#endif
+    }
 
 
 
@@ -873,6 +914,7 @@ private:
      * low-level machine step.
      */
     void transition_by_force() {
+      check_locked();
       if (state == st_normal) {
         // so (tq.middle_empty())
         return;
@@ -933,11 +975,11 @@ private:
                     }
                 }
             }
+            if (config->debug) {
+                log_queues("Before flushing:");
+            }
         }
 
-        if (config->debug) {
-            log_queues("Before flushing:");
-        }
         // unlocked now, why?
         flush_to_next();
     };
