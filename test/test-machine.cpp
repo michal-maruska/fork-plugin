@@ -164,6 +164,20 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, AcceptTimeBackwardsDoesNotDeadlock) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, push_time).Times(AnyNumber());
+
+  // Set initial current time
+  fm->accept_time(100);
+
+  // Send a smaller time (backwards) - must not deadlock!
+  Time decision = fm->accept_time(50);
+  EXPECT_EQ(decision, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 
