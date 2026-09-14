@@ -75,6 +75,7 @@ private:
 
 #ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
+    mutable std::mutex mOutputLock;
     using  unique_lock = std::unique_lock<std::mutex>;
 
     void do_lock() const
@@ -87,10 +88,13 @@ private:
     }
     void check_locked() const {}
 #else
-    int mLock = 0;
+    mutable int mLock = 0;
+    mutable int mOutputLock = 0;
 
     using  unique_lock = empty_unique_lock<int>;
 
+    void do_lock() const {}
+    void do_unlock() const {}
     void lock() const {}
     void unlock() const {}
     void check_locked() const {}
@@ -359,8 +363,9 @@ public:
     }
 
     void stop() {
-        // wait & stop
+        // wait & stop both state machine execution and output flushing
         unique_lock wait_lock(mLock);
+        unique_lock wait_output_lock(mOutputLock);
     }
 
 
@@ -873,6 +878,7 @@ private:
      * low-level machine step.
      */
     void transition_by_force() {
+      check_locked();
       if (state == st_normal) {
         // so (tq.middle_empty())
         return;
@@ -933,12 +939,12 @@ private:
                     }
                 }
             }
+            if (config && config->debug) {
+                log_queues("Before flushing:");
+            }
         }
 
-        if (config->debug) {
-            log_queues("Before flushing:");
-        }
-        // unlocked now, why?
+        // unlocked now, flush output
         flush_to_next();
     };
 
@@ -988,6 +994,7 @@ private:
      *queue. Unlocks to be re-entrant!
      **/
     void flush_to_next() {
+        unique_lock output_lock(mOutputLock);
         while (!environment->output_frozen()) {
 #ifndef DISABLE_STD_LIBRARY
             auto event = pop_event_if_present();
@@ -1039,15 +1046,21 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+private:
+    [[nodiscard]] Time next_decision_time_unlocked() const {
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+public:
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
     }
 
 
@@ -1304,7 +1317,7 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;
