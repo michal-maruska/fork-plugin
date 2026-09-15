@@ -206,7 +206,7 @@ public:
 
     // prefix with a space.
     void mdb(const char* fmt...) const {
-        if (config->debug) {
+        if (config && config->debug) {
             va_list argptr;
             va_start(argptr, fmt);
 #ifdef KERNEL
@@ -224,7 +224,7 @@ public:
 
     // without the leading space
     void mdb_raw(const char* format...) const {
-        if (config->debug) {
+        if (config && config->debug) {
             va_list argptr;
             va_start(argptr, format);
             environment->vlog(format, argptr);
@@ -274,6 +274,7 @@ public:
             this->config
 #endif
             ;
+        if (!fork_configuration) return 0;
 
         switch (type) {
 #if VERIFICATION_MATRIX
@@ -401,6 +402,7 @@ private:
             this->config
 #endif
             ;
+        if (!pconfig) return false;
         return (pconfig->fork_keycode[code] != no_key);
     }
 
@@ -933,11 +935,12 @@ private:
                     }
                 }
             }
+
+            if (config && config->debug) {
+                log_queues("Before flushing:");
+            }
         }
 
-        if (config->debug) {
-            log_queues("Before flushing:");
-        }
         // unlocked now, why?
         flush_to_next();
     };
@@ -958,8 +961,7 @@ private:
     };
 
 #ifndef DISABLE_STD_LIBRARY
-    [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present() {
-        unique_lock lock(mLock);
+    [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present_unlocked() {
         if (tq.can_pop()) {
             PlatformEvent ev = tq.head();
             save_event_to_log(ev);
@@ -968,9 +970,13 @@ private:
         }
         return std::nullopt;
     }
-#else
-    bool pop_event_if_present(PlatformEvent& out_event) {
+
+    [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present() {
         unique_lock lock(mLock);
+        return pop_event_if_present_unlocked();
+    }
+#else
+    bool pop_event_if_present_unlocked(PlatformEvent& out_event) {
         if (tq.can_pop()) {
             out_event = tq.head();
             save_event_to_log(out_event);
@@ -978,6 +984,11 @@ private:
             return true;
         }
         return false;
+    }
+
+    bool pop_event_if_present(PlatformEvent& out_event) {
+        unique_lock lock(mLock);
+        return pop_event_if_present_unlocked(out_event);
     }
 #endif
 
@@ -990,7 +1001,11 @@ private:
     void flush_to_next() {
         while (!environment->output_frozen()) {
 #ifndef DISABLE_STD_LIBRARY
-            auto event = pop_event_if_present();
+            std::optional<PlatformEvent> event;
+            {
+                unique_lock lock(mLock);
+                event = pop_event_if_present_unlocked();
+            }
             if (event.has_value()) {
                 relay_event(*event);
             } else {
@@ -998,7 +1013,12 @@ private:
             }
 #else
             PlatformEvent event;
-            if (pop_event_if_present(event)) {
+            bool popped = false;
+            {
+                unique_lock lock(mLock);
+                popped = pop_event_if_present_unlocked(event);
+            }
+            if (popped) {
                 relay_event(event);
             } else {
                 break;
@@ -1039,6 +1059,7 @@ private:
         }
     }
 
+public:
     // fixme: returned by the accept_* public API methods
     [[nodiscard]] Time next_decision_time() const {
         unique_lock lock(mLock);
