@@ -12,6 +12,8 @@
 #include "empty_last.h"
 
 #include <gmock/gmock.h>
+#include <thread>
+#include <atomic>
 
 typedef int Time;
 typedef int KeyCode;
@@ -71,6 +73,7 @@ public:
 
   void vlog(const char* format, va_list argptr) const override {
     vprintf(format, argptr);
+    fflush(stdout);
   }
 
   void log(const char* format...) const override
@@ -79,6 +82,7 @@ public:
     va_start(argptr, format);
     vprintf(format, argptr);
     va_end(argptr);
+    fflush(stdout);
   };
   MOCK_METHOD(void, fmt_event,(const char* message, const TestEvent &event), (const));
 
@@ -117,13 +121,7 @@ protected:
 
   ~machineTest()
   {
-    // machine `owns' this:
-    // config = nullptr;
-    // so don't do this:
-    // delete config;
-
     delete fm;
-    delete environment;
   }
 
   testEnvironment *environment;
@@ -162,6 +160,98 @@ TEST_F(machineTest, Configure) {
   EXPECT_EQ(config->fork_keycode[A], B);
 
   Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, BackwardTimeNoDeadlock) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, push_time).Times(AnyNumber());
+
+  fm->accept_time(200);
+  // Time moving backwards previously caused self-deadlock on mLock in accept_time()
+  Time next = fm->accept_time(100);
+  EXPECT_EQ(next, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, KeyOutOfBoundsHandling) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, release_p).Times(AnyNumber());
+  EXPECT_CALL(*environment, relay_event).Times(AnyNumber());
+  EXPECT_CALL(*environment, push_time).Times(AnyNumber());
+
+  // Keycode >= 256 should be safely ignored and return 0 without buffer overflow
+  TestEvent invalid_event(100L, 256);
+  EXPECT_CALL(*environment, detail_of(testing::_)).WillRepeatedly(Return(256));
+  EXPECT_CALL(*environment, press_p(testing::_)).WillRepeatedly(Return(true));
+  EXPECT_CALL(*environment, time_of(testing::_)).WillRepeatedly(Return(100));
+
+  Time next = fm->accept_event(invalid_event);
+  EXPECT_EQ(next, 0);
+
+  EXPECT_EQ(fm->configure_key(fork_configure_key_fork, 256, 10, true), 0);
+  EXPECT_EQ(fm->configure_twins(1, 256, 10, 100, true), 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+class DummyThreadSafeEnvironment final : public forkNS::platformEnvironment<KeyCode, Time,
+                                                                             test_archived_event,
+                                                                             TestEvent> {
+public:
+  bool press_p(const TestEvent& event) const override { UNUSED(event); return true; }
+  bool release_p(const TestEvent& event) const override { UNUSED(event); return false; }
+  Time time_of(const TestEvent& event) const override { UNUSED(event); return 100; }
+  KeyCode detail_of(const TestEvent& event) const override { UNUSED(event); return 15; }
+  bool ignore_event(const TestEvent &pevent) override { UNUSED(pevent); return false; }
+  bool output_frozen() override { return false; }
+  void relay_event(const TestEvent &pevent) const override { UNUSED(pevent); }
+  void push_time(Time now) override { UNUSED(now); }
+  void vlog(const char* format, va_list argptr) const override { UNUSED(format); UNUSED(argptr); }
+  void log(const char* format...) const override { UNUSED(format); }
+  void fmt_event(const char* message, const TestEvent &event) const override { UNUSED(message); UNUSED(event); }
+  void archive_event(test_archived_event& ae, const TestEvent& event) override { UNUSED(ae); UNUSED(event); }
+  void free_event(TestEvent* pevent) const override { UNUSED(pevent); }
+  void rewrite_event(TestEvent& pevent, KeyCode code) override { UNUSED(pevent); UNUSED(code); }
+};
+
+using threadMachineRec = forkNS::forkingMachine<KeyCode, Time,
+                                                 TestEvent, DummyThreadSafeEnvironment,
+                                                 test_archived_event, last_events_t>;
+
+TEST_F(machineTest, MultiThreadedLockingSafety) {
+  auto thread_fm = std::make_unique<threadMachineRec>(new DummyThreadSafeEnvironment());
+  thread_fm->create_configs();
+  thread_fm->set_debug(0);
+
+  std::atomic<bool> start{false};
+
+  auto t1 = std::thread([&]() {
+    while (!start) {}
+    for (int i = 1; i <= 100; ++i) {
+      thread_fm->accept_time(i * 10);
+    }
+  });
+
+  auto t2 = std::thread([&]() {
+    while (!start) {}
+    for (int i = 0; i < 100; ++i) {
+      thread_fm->configure_key(fork_configure_key_fork, (i % 250), (i % 250) + 1, true);
+    }
+  });
+
+  auto t3 = std::thread([&]() {
+    while (!start) {}
+    for (int i = 0; i < 100; ++i) {
+      (void)thread_fm->next_decision_time();
+      thread_fm->configure_global(fork_configure_clear_interval, i, true);
+    }
+  });
+
+  start = true;
+  t1.join();
+  t2.join();
+  t3.join();
 }
 
 #if 0

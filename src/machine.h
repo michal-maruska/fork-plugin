@@ -248,7 +248,7 @@ public:
 
         environment->log("ctor: allocating last_events\n");
         last_events_log.set_capacity(max_last);
-        environment->log("ctor: allocated last_events %lu (%lu\n", last_events_log.size(), max_last);
+        environment->log("ctor: allocated last_events %lu (%d)\n", (unsigned long)last_events_log.size(), max_last);
 
         environment->log("ctor: resetting forkActive\n");
 #ifndef DISABLE_STD_LIBRARY
@@ -1039,9 +1039,8 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+private:
+    [[nodiscard]] Time next_decision_time_unlocked() const {
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
@@ -1050,8 +1049,12 @@ private:
             return 0;
     }
 
-
 public:
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
+    }
 /**
  * key and twin have a relationship, given by type.
  * |--------------|========\-----------\
@@ -1067,6 +1070,9 @@ public:
     };
 
     int configure_twins(int type, Keycode key, Keycode twin, int value, bool set) {
+        if (key >= MAX_KEYCODE || twin >= MAX_KEYCODE)
+            return 0;
+        unique_lock lock(mLock);
 #if VERIFICATION_MATRIX
         switch (type) {
         case fork_configure_total_limit:
@@ -1098,6 +1104,9 @@ public:
         key_repeat,                 // true/false
     };
     int configure_key(int type, Keycode key, int value, bool set) {
+        if (key >= MAX_KEYCODE)
+            return 0;
+        unique_lock lock(mLock);
         mdb("%s: keycode %d -> value %d, function %d\n",
             __func__, key, value, type);
 
@@ -1272,7 +1281,7 @@ public:
             // no need:
             mCurrent_time = 0;
 
-            if (key > MAX_KEYCODE) {
+            if (key >= MAX_KEYCODE) {
                 mdb("%s: out-of-bound event %d\n", __func__);
                 return 0;
             }
@@ -1302,7 +1311,7 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;
