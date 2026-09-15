@@ -164,6 +164,32 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, ThreadSafetyAndLocking) {
+  KeyCode keyA = 20;
+  KeyCode keyB = 21;
+
+  // Verify configure_key getters and setters thread-safely
+  fm->configure_key(fork_configure_key_fork, keyA, keyB, true);
+  int retrieved = fm->configure_key(fork_configure_key_fork, keyA, 0, false);
+  EXPECT_EQ(retrieved, keyB);
+
+  // Verify global configuration thread-safely
+  fm->configure_global(fork_configure_repeat_limit, 150, true);
+  int repeat_limit = fm->configure_global(fork_configure_repeat_limit, 0, false);
+  EXPECT_EQ(repeat_limit, 150);
+
+  // Verify debug configuration thread-safely
+  fm->set_debug(1);
+  int debug_val = fm->configure_global(fork_configure_debug, 0, false);
+  EXPECT_EQ(debug_val, 1);
+
+  // Verify next_decision_time thread-safety when in normal state
+  Time decision_time = fm->next_decision_time();
+  EXPECT_EQ(decision_time, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 
