@@ -6,7 +6,7 @@ template <typename Mutex>
 class empty_unique_lock
 {
 public:
-    explicit empty_unique_lock(Mutex& m) {
+    explicit empty_unique_lock(const Mutex& m) {
         UNUSED(m);
     }
 
