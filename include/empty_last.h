@@ -17,13 +17,15 @@ extern "C" {
 template <typename event>
 class empty_last_events_t
 #ifndef KERNEL
-  : std::vector<event>
+  : public std::vector<event>
 #endif
 {
 public:
     // override:
     static
-    void push_back(const event& __x) {}
+    void push_back(const event& __x) {
+        UNREFERENCED_PARAMETER(__x);
+    }
 
     // emplace_back()
     static
@@ -36,5 +38,5 @@ public:
         return 0;
     }
 
-  // bool full() const {return false;}
+    bool full() const { return false; }
 };
