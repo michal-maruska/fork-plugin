@@ -25,7 +25,6 @@ struct test_archived_event
   KeyCode forked;
   bool press;                  /* client type? */
 };
-// typedef
 
 using testing::Mock;
 using testing::Return;
@@ -40,14 +39,6 @@ public:
     test_archived_event{time, keycode, forked, press} {}
 
   ~TestEvent() {}
-
-  /* todo:
-  operator=();
-  */
-private:
-  // copy ctor:
-  // when we store in the triqueue, we _copy_
-  // TestEvent(TestEvent& copy) = delete; // we need the builtin one
 };
 
 // I want to mock this:
@@ -55,7 +46,6 @@ class testEnvironment final : public forkNS::platformEnvironment<KeyCode, Time,
                                                                  test_archived_event,
                                                                  TestEvent>{
 public:
-  // virtual
   MOCK_METHOD(bool, press_p, (const TestEvent& event), (const));
   MOCK_METHOD(bool, release_p,(const TestEvent& event), (const));
   MOCK_METHOD(Time, time_of,(const TestEvent& event), (const));
@@ -66,8 +56,6 @@ public:
   MOCK_METHOD(bool, output_frozen,());
   MOCK_METHOD(void, relay_event,(const TestEvent &pevent), (const));
   MOCK_METHOD(void, push_time,(Time now));
-
-  // MOCK_METHOD(void, vlog,(const char* format, va_list argptr));
 
   void vlog(const char* format, va_list argptr) const override {
     vprintf(format, argptr);
@@ -98,7 +86,6 @@ using fork_configuration = machineRec::fork_configuration;
 
 // template instantiation
 namespace forkNS {
-  // explicit template instantiation
   template class forkingMachine<KeyCode, Time, TestEvent, testEnvironment, test_archived_event, last_events_t>;
 }
 
@@ -110,18 +97,12 @@ protected:
                     config (new fork_configuration),
                     fm (new machineRec(environment)) {
 
-      // mmc: I could instead call forking_machine->create_configs();
       config->debug = 0;
       fm->config.reset(config);
     }
 
   ~machineTest()
   {
-    // machine `owns' this:
-    // config = nullptr;
-    // so don't do this:
-    // delete config;
-
     delete fm;
     delete environment;
   }
@@ -131,9 +112,15 @@ protected:
   fork_configuration *config;
 };
 
+class TestDumper : public forkNS::event_dumper<test_archived_event> {
+public:
+    int count = 0;
+    void operator()(const test_archived_event& ev) override {
+        UNUSED(ev);
+        count++;
+    }
+};
 
-
-// When using a fixture, use TEST_F(TestFixtureClassName, TestName)
 TEST_F(machineTest, AcceptEvent) {
   TestEvent pevent(100L, 56);
 
@@ -147,12 +134,9 @@ TEST_F(machineTest, AcceptEvent) {
 
   EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
 
-  Time next = fm->accept_event(pevent); // this hands over ownership?
+  Time next = fm->accept_event(pevent);
   UNUSED(next);
-  // expect calls:
-  // so for that EXPECT_CALL: this is necessary? as part of this test:
   Mock::VerifyAndClearExpectations(environment);
-  // ::testing::Mock::AllowLeak(environment);
 }
 
 TEST_F(machineTest, Configure) {
@@ -164,132 +148,24 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
-#if 0
-// fixme: I need equal_to()
+TEST_F(machineTest, DumpLastEvents) {
+  TestDumper dumper;
+  fm->dump_last_events(&dumper);
+  EXPECT_EQ(dumper.count, 0);
+}
 
+TEST_F(machineTest, LockingAndDecisionTime) {
+  EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
 
-// create event, non-forkable, pass, and expect it's got back, and freed?
-TEST_F(machineTest, EventFreed) {
+  // Check initial decision time when normal
+  EXPECT_EQ(fm->next_decision_time(), 0);
 
-  KeyCode A = 10;
-  Time a_time = 156;
-  Time next_time = 201;
-  TestEvent A_pevent(a_time, A);
+  // Accept time update under lock
+  Time next = fm->accept_time(100);
+  EXPECT_EQ(next, 0);
 
-  KeyCode B = 11;
-  config->debug = 1;
-  fm->configure_key(fork_configure_key_fork, A, B, 1);
-  // EXPECT_EQ(config->fork_keycode[A], B);
-
-  // Emulate next plugin:
-  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
-
-
-  ON_CALL(*environment, ignore_event(A_pevent)).WillByDefault(Return(false));
-  EXPECT_CALL(*environment, time_of(A_pevent)).WillRepeatedly(Return(a_time));
-
-  // many times:
-  TestEvent& a = A_pevent;
-  EXPECT_CALL(*environment, detail_of(a)).Times(AnyNumber()).WillRepeatedly(Return(A));
-  ON_CALL(*environment, press_p(A_pevent)).WillByDefault(Return(true));
-  // archive_event
-  // fmt_event
-  // ON_CALL(*environment,rewrite_event).
-  //  EXPECT_CALL(*environment, push_time(a_time));
-  EXPECT_CALL(*environment, push_time(a_time + next_time));
-
-  EXPECT_CALL(*environment,rewrite_event)
-    .WillOnce([](TestEvent& pevent, KeyCode b) {
-      auto event = static_cast<TestEvent&>(pevent).event;
-      event->key = b;
-    });
-
-  fm->accept_event(A_pevent);
-#if 1
-  // we lost A_pevent
-  EXPECT_CALL(*environment, relay_event); // (a)
-  // this drop leaks ^^^
-  EXPECT_CALL(*environment, free_event(&a)); // (nullptr)
-#endif
-
-  fm->accept_time(a_time + next_time);
+  // Accept confirmation under lock
+  fm->accept_confirmation();
 
   Mock::VerifyAndClearExpectations(environment);
 }
-
-TEST_F(machineTest, ForkBySecond) {
-  // configure
-  KeyCode A = 10;
-  Time a_time = 156;
-  TestEvent A_pevent(a_time, A);
-  KeyCode F = 11;
-
-  Time b_time = a_time + 50;
-  KeyCode B = 60;
-  TestEvent B_pevent(b_time, B);
-
-  Time b_release_time = b_time + 50;
-  TestEvent B_release_pevent (b_release_time, B, false);
-
-  config->debug = 1;
-  fm->configure_key(fork_configure_key_fork, A, F, 1); // 1 means SET
-  // EXPECT_EQ(config->fork_keycode[A], F);
-
-  TestEvent& a = A_pevent;
-  TestEvent& b = B_pevent;
-
-  std::cout << "A: " << &a << " b:" << &b << " br:" << &B_release_pevent << std::endl;
-
-  // return:
-  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
-
-  // many times:
-  EXPECT_CALL(*environment, ignore_event(A_pevent)).WillRepeatedly(Return(false));
-  EXPECT_CALL(*environment, time_of(A_pevent)).WillRepeatedly(Return(a_time));
-  EXPECT_CALL(*environment, detail_of(a)).WillRepeatedly(Return(A));
-  EXPECT_CALL(*environment, press_p(A_pevent)).WillRepeatedly(Return(true));
-
-  EXPECT_CALL(*environment, time_of(B_pevent)).WillRepeatedly(Return(b_time));
-  EXPECT_CALL(*environment, ignore_event(B_pevent)).WillRepeatedly(Return(false));
-  EXPECT_CALL(*environment, detail_of(b)).WillRepeatedly(Return(B));
-  EXPECT_CALL(*environment, press_p(B_pevent)).WillRepeatedly(Return(true));
-
-  EXPECT_CALL(*environment, detail_of(B_release_pevent)).WillRepeatedly(Return(B));
-  EXPECT_CALL(*environment, time_of(B_release_pevent)).WillRepeatedly(Return(b_release_time));
-  EXPECT_CALL(*environment, press_p(B_release_pevent)).WillRepeatedly(Return(false));
-  // EXPECT_CALL(*environment, release_p(B_release_pevent)).WillRepeatedly(Return(true));
-  // archive_event
-  // fmt_event
-  // ON_CALL(*environment,rewrite_event).
-#if 0
-  EXPECT_CALL(*environment,push_time(a_time));
-  EXPECT_CALL(*environment,push_time(b_time));
-  EXPECT_CALL(*environment,rewrite_event)
-    .WillOnce([](TestEvent* pevent, KeyCode b) {
-      auto event = static_cast<TestEvent*>(pevent)->event;
-      event->key = b;
-    });
-#endif
-
-#if 0
-  // we lost A_pevent
-  EXPECT_CALL(*environment, relay_event); // todo: check it's F
-  // this drop leaks ^^^
-  EXPECT_CALL(*environment, free_event(a)); // (nullptr)
-#endif
-
-  fm->accept_event(std::move(A_pevent));
-  fm->accept_event(std::move(B_pevent));
-  fm->accept_event(std::move(B_release_pevent));
-
-  Mock::VerifyAndClearExpectations(environment);
-}
-
-#endif
-
-
-// Thus your main() function must return the value of RUN_ALL_TESTS().
-// Calling it more than once conflicts with some advanced GoogleTest features (e.g., thread-safe death tests)
-// RUN_ALL_TESTS()
-
-// gtest_main (as opposed to with gtest

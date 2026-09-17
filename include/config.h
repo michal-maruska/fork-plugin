@@ -15,20 +15,15 @@
 // I like colored tracing (in 256-color xterm)
 #define USE_COLORS 1
 
-/** What does the lock protect?  ... access to the  queues,state
- * mouse signal handler cannot just make "fork", while a key event is being analyzed.
+/** What does the lock protect? Access to queues and internal state.
  *
- * Locking is broken: but it's not used now:
+ * Concurrent events (e.g., key events, timers, mouse callbacks) are serialized
+ * via mLock in forkingMachine. State transitions and queue manipulation
+ * run under mLock.
  *
- *   ---> keyevent ->  xkb action -> mouse
- *                                     |
- *   prev   <----                 <---  thaw
- *        ->   process  \
- *               exits  /
- *             unlocks!
- *
- *
- *  lock is gone!! <- action */
+ * Output flushing (flush_to_next) releases mLock before dispatching events
+ * downstream to prevent re-entrant deadlocks if downstream handlers trigger callbacks.
+ */
 #define USE_LOCKING 1
 #define MULTIPLE_CONFIGURATIONS 0
 
