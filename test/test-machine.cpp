@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
+#include <vector>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -160,6 +162,55 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConcurrentAccess) {
+  EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, detail_of(testing::_)).Times(AnyNumber()).WillRepeatedly(testing::Return(56));
+  EXPECT_CALL(*environment, time_of(testing::_)).Times(AnyNumber()).WillRepeatedly(testing::Return(100));
+  EXPECT_CALL(*environment, press_p(testing::_)).Times(AnyNumber()).WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*environment, release_p(testing::_)).Times(AnyNumber()).WillRepeatedly(testing::Return(false));
+  EXPECT_CALL(*environment, ignore_event(testing::_)).Times(AnyNumber()).WillRepeatedly(testing::Return(false));
+  EXPECT_CALL(*environment, relay_event(testing::_)).Times(AnyNumber());
+  EXPECT_CALL(*environment, push_time(testing::_)).Times(AnyNumber());
+  EXPECT_CALL(*environment, rewrite_event(testing::_, testing::_)).Times(AnyNumber());
+
+  constexpr int iterations = 200;
+  std::vector<std::thread> threads;
+
+  threads.emplace_back([this]() {
+    for (int i = 0; i < iterations; ++i) {
+      KeyCode key = 10 + (i % 10);
+      TestEvent press_ev(100 + i, key, true);
+      fm->accept_event(press_ev);
+      TestEvent rel_ev(100 + i + 1, key, false);
+      fm->accept_event(rel_ev);
+    }
+  });
+
+  threads.emplace_back([this]() {
+    for (int i = 0; i < iterations; ++i) {
+      fm->accept_time(100 + i);
+    }
+  });
+
+  threads.emplace_back([this]() {
+    for (int i = 0; i < iterations; ++i) {
+      fm->configure_key(fork_configure_key_fork, 56, 100 + (i % 10), true);
+    }
+  });
+
+  threads.emplace_back([this]() {
+    for (int i = 0; i < iterations; ++i) {
+      fm->accept_confirmation();
+    }
+  });
+
+  for (auto& t : threads) {
+    t.join();
+  }
 
   Mock::VerifyAndClearExpectations(environment);
 }
