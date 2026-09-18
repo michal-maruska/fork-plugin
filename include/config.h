@@ -15,20 +15,10 @@
 // I like colored tracing (in 256-color xterm)
 #define USE_COLORS 1
 
-/** What does the lock protect?  ... access to the  queues,state
- * mouse signal handler cannot just make "fork", while a key event is being analyzed.
- *
- * Locking is broken: but it's not used now:
- *
- *   ---> keyevent ->  xkb action -> mouse
- *                                     |
- *   prev   <----                 <---  thaw
- *        ->   process  \
- *               exits  /
- *             unlocks!
- *
- *
- *  lock is gone!! <- action */
+/** What does the lock protect?  ... access to the queues, state, and timers.
+ * Prevents race conditions when key events, timer wakeups, or mouse signals
+ * arrive concurrently.
+ */
 #define USE_LOCKING 1
 #define MULTIPLE_CONFIGURATIONS 0
 
