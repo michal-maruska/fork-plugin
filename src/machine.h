@@ -77,11 +77,11 @@ private:
     mutable std::mutex mLock;
     using  unique_lock = std::unique_lock<std::mutex>;
 
-    void do_lock() const
+    void lock() const
     {
         mLock.lock();
     }
-    void do_unlock() const
+    void unlock() const
     {
         mLock.unlock();
     }
@@ -1039,15 +1039,19 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+    [[nodiscard]] Time next_decision_time_unlocked() const {
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
     }
 
 
@@ -1304,7 +1308,7 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;
