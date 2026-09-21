@@ -77,22 +77,12 @@ private:
     mutable std::mutex mLock;
     using  unique_lock = std::unique_lock<std::mutex>;
 
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
     void check_locked() const {}
 #else
     int mLock = 0;
 
     using  unique_lock = empty_unique_lock<int>;
 
-    void lock() const {}
-    void unlock() const {}
     void check_locked() const {}
 #endif
 
@@ -933,12 +923,13 @@ private:
                     }
                 }
             }
+
+            if (config->debug) {
+                log_queues("Before flushing:");
+            }
         }
 
-        if (config->debug) {
-            log_queues("Before flushing:");
-        }
-        // unlocked now, why?
+        // unlocked now for flushing to next layer
         flush_to_next();
     };
 
@@ -1132,17 +1123,13 @@ public:
         };
 
         publisher->prepare(max_requested);
-#if DISABLE_STD_LIBRARY
+#ifndef DISABLE_STD_LIBRARY
         std::function<void(const archived_event_t&)> lambda =
             [publisher](const archived_event_t& ev){ publisher->event(ev); };
-        // auto f = std::function<void(const archived_event&)>(bind(publisher->event(), publisher,));
 
-        // todo:
-        // fixme: we need to increase an iterator .. pointer .... to the C array!
-        // last_events.
-        for_each(last_events_log.begin(),
-                 last_events_log.end(),
-                 lambda);
+        std::for_each(last_events_log.begin(),
+                      last_events_log.end(),
+                      lambda);
 #endif
         mdb("sending %d events\n", max_requested);
 
@@ -1190,14 +1177,8 @@ public:
 
     void dump_last_events(event_dumper<archived_event_t>* dumper) const {
         unique_lock lock(mLock);
-#if DISABLE_STD_LIBRARY
-#if 0
-        std::function<void(const event_dumper&, const archived_event_t&)> doit0 = &event_dumper::operator();
-        // lambda?
-        std::function<void(const archived_event_t&)> doit = std::bind(&event_dumper::operator(), doit, placeholders::_1);
-#else
+#ifndef DISABLE_STD_LIBRARY
         std::function<void(const archived_event_t&)> lambda = [dumper](const archived_event_t& ev){ dumper->operator()(ev); };
-#endif
         if (last_events_log.full()) {
             std::for_each(last_events_log.begin(),
                           last_events_log.end(),

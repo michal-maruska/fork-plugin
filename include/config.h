@@ -15,20 +15,9 @@
 // I like colored tracing (in 256-color xterm)
 #define USE_COLORS 1
 
-/** What does the lock protect?  ... access to the  queues,state
- * mouse signal handler cannot just make "fork", while a key event is being analyzed.
- *
- * Locking is broken: but it's not used now:
- *
- *   ---> keyevent ->  xkb action -> mouse
- *                                     |
- *   prev   <----                 <---  thaw
- *        ->   process  \
- *               exits  /
- *             unlocks!
- *
- *
- *  lock is gone!! <- action */
+/** What does the lock protect?  ... access to queues, machine state, and configuration.
+ * Concurrent event processing (e.g. mouse callbacks or timer/event threads) is synchronized
+ * using mLock RAII guards. */
 #define USE_LOCKING 1
 #define MULTIPLE_CONFIGURATIONS 0
 
