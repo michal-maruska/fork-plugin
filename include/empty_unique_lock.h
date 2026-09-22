@@ -2,13 +2,15 @@
 
 #include "config.h"
 
-template <typename mutex>
+template <typename Mutex>
 class empty_unique_lock
 {
 public:
-    empty_unique_lock(mutex m) {
-        UNUSED(m);
-    };
+    template <typename... Args>
+    explicit empty_unique_lock(Args&&...) {}
 
     ~empty_unique_lock() {}
+
+    void lock() {}
+    void unlock() {}
 };

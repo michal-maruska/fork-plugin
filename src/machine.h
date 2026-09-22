@@ -75,21 +75,66 @@ private:
 
 #ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
-    using  unique_lock = std::unique_lock<std::mutex>;
+    mutable bool mIsLocked = false;
 
-    void do_lock() const
-    {
+    class unique_lock {
+        std::unique_lock<std::mutex> mLock;
+        const forkingMachine* mMachine;
+
+    public:
+        explicit unique_lock(const forkingMachine& machine)
+            : mLock(machine.mLock), mMachine(&machine) {
+            mMachine->mIsLocked = true;
+        }
+
+        explicit unique_lock(std::mutex& m, const forkingMachine* machine = nullptr)
+            : mLock(m), mMachine(machine) {
+            if (mMachine) {
+                mMachine->mIsLocked = true;
+            }
+        }
+
+        ~unique_lock() {
+            if (mMachine && mLock.owns_lock()) {
+                mMachine->mIsLocked = false;
+            }
+        }
+
+        unique_lock(const unique_lock&) = delete;
+        unique_lock& operator=(const unique_lock&) = delete;
+
+        void unlock() {
+            if (mMachine) {
+                mMachine->mIsLocked = false;
+            }
+            mLock.unlock();
+        }
+
+        void lock() {
+            mLock.lock();
+            if (mMachine) {
+                mMachine->mIsLocked = true;
+            }
+        }
+    };
+
+    void lock() const {
         mLock.lock();
+        mIsLocked = true;
     }
-    void do_unlock() const
-    {
+
+    void unlock() const {
+        mIsLocked = false;
         mLock.unlock();
     }
-    void check_locked() const {}
+
+    void check_locked() const {
+        assert(mIsLocked);
+    }
 #else
     int mLock = 0;
 
-    using  unique_lock = empty_unique_lock<int>;
+    using unique_lock = empty_unique_lock<int>;
 
     void lock() const {}
     void unlock() const {}
@@ -266,7 +311,7 @@ public:
      * @value .. either parameter is set to this value if @set is 1
      * or ... ignored  */
     int configure_global(fork_configuration_t type, int value, bool set) {
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
         const auto fork_configuration =
 #ifndef DISABLE_STD_LIBRARY
             this->config.get()
@@ -353,14 +398,14 @@ public:
     }
 
     void set_debug(int level) {
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
         config->debug = level;
         // (machine->config->debug? 0: 1);
     }
 
     void stop() {
         // wait & stop
-        unique_lock wait_lock(mLock);
+        unique_lock wait_lock(*this);
     }
 
 
@@ -896,49 +941,37 @@ private:
     /**
      * Take from `input_queue', + the mCurrent_time + force  -> run the machine.
      */
-    void run_automaton(bool force_also) {
-        // fixme: maybe All I need is the nextPlugin?
-        {
-            unique_lock lock(mLock);
-#if 0
-            if (environment->output_frozen() || (! tq.middle_empty() )) {
-                // log_queues_and_nextplugin(message)
-                mdb("%s: next %sfrozen: internal %d, input: %d\n", __func__,
-                    (environment->output_frozen()?"":"NOT "),
-                    internal_queue.length(),
-                    input_queue.length());
-            }
-#endif
-            // notice that instead of recursion, all the calls to `rewind_machine' are
-            // followed by return to this cycle!
-            while (! environment->output_frozen()) {
+    void run_automaton_loop(bool force_also) {
+        check_locked();
+        while (! environment->output_frozen()) {
+            if (! tq.third_empty()) {
+                const PlatformEvent& event = tq.peek_third();
+                transition_by_key(event);
+            } else {
+                if ((state != st_normal) && mCurrent_time) {
+                    if (transition_by_time(mCurrent_time))
+                        continue;
+                }
 
-                if (! tq.third_empty()) {
-                    const PlatformEvent& event = tq.peek_third();
-                    transition_by_key(event); // here crash?
+                if (force_also && (state != st_normal)) {
+                    transition_by_force();
                 } else {
-                    if ((state != st_normal) && mCurrent_time) {
-                        // !middle_empty()
-                        if (transition_by_time(mCurrent_time))
-                            // If this time helped to decide -> machine rewound,
-                            // we have to try again, maybe the queue is not empty?.
-                            continue;
-                    }
-
-                    if (force_also && (state != st_normal)) {
-                        // !middle_empty()
-                        transition_by_force();
-                    } else {
-                        break;
-                    }
+                    break;
                 }
             }
         }
+    }
 
-        if (config->debug) {
+    void run_automaton(bool force_also) {
+        {
+            unique_lock lock(*this);
+            run_automaton_loop(force_also);
+        }
+
+        if (config && config->debug) {
             log_queues("Before flushing:");
         }
-        // unlocked now, why?
+
         flush_to_next();
     };
 
@@ -947,6 +980,7 @@ private:
    Returns code itself, if not forked. */
     [[nodiscard]] bool
     key_forked(Keycode code) const {
+        check_locked();
         return (forkActive[code] != code && forkActive[code]!= KEYCODE_UNUSED);
     }
 
@@ -959,7 +993,7 @@ private:
 
 #ifndef DISABLE_STD_LIBRARY
     [[nodiscard]] inline std::optional<PlatformEvent> pop_event_if_present() {
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
         if (tq.can_pop()) {
             PlatformEvent ev = tq.head();
             save_event_to_log(ev);
@@ -970,7 +1004,7 @@ private:
     }
 #else
     bool pop_event_if_present(PlatformEvent& out_event) {
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
         if (tq.can_pop()) {
             out_event = tq.head();
             save_event_to_log(out_event);
@@ -1022,7 +1056,7 @@ private:
 
         Time now;
         {
-            unique_lock lock(mLock);
+            unique_lock lock(*this);
             const PlatformEvent *item = tq.first();
             if (item == nullptr) {
                 now = mCurrent_time;
@@ -1039,15 +1073,19 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+    [[nodiscard]] Time next_decision_time_locked() const {
+        check_locked();
         if ((state == st_verify)
             || (state == st_suspect))
-            // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(*this);
+        return next_decision_time_locked();
     }
 
 
@@ -1067,7 +1105,7 @@ public:
     };
 
     int configure_twins(int type, Keycode key, Keycode twin, int value, bool set) {
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
 #if VERIFICATION_MATRIX
         switch (type) {
         case fork_configure_total_limit:
@@ -1099,7 +1137,7 @@ public:
         key_repeat,                 // true/false
     };
     int configure_key(int type, Keycode key, int value, bool set) {
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
         mdb("%s: keycode %d -> value %d, function %d\n",
             __func__, key, value, type);
 
@@ -1124,7 +1162,7 @@ public:
     int dump_last_events_to_client(event_publisher<archived_event_t>* publisher, int max_requested) {
         // I don't need to count them! last_events_count
         // should be locked
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
         int queue_count = last_events_log.size();
 
         if (max_requested > queue_count) {
@@ -1158,7 +1196,7 @@ public:
         @return false if allocation  failed.
     */
     bool create_configs() {
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
 
         environment->log("%s\n", __func__);
 
@@ -1189,7 +1227,7 @@ public:
     }
 
     void dump_last_events(event_dumper<archived_event_t>* dumper) const {
-        unique_lock lock(mLock);
+        unique_lock lock(*this);
 #if DISABLE_STD_LIBRARY
 #if 0
         std::function<void(const event_dumper&, const archived_event_t&)> doit0 = &event_dumper::operator();
@@ -1249,7 +1287,7 @@ public:
      */
     Time accept_event(const PlatformEvent& pevent) noexcept(false) {
         {
-            unique_lock lock(mLock);
+            unique_lock lock(*this);
             const Keycode key = environment->detail_of(pevent);
 #if 0
             environment->fmt_event(__func__, pevent);
@@ -1289,8 +1327,15 @@ public:
             } else {
                 tq.push(pevent);
             }
+
+            run_automaton_loop(false);
         }
-        run_automaton(false);
+
+        if (config && config->debug) {
+            log_queues("Before flushing:");
+        }
+
+        flush_to_next();
 
         return next_decision_time();
     }
@@ -1298,19 +1343,26 @@ public:
 
     Time accept_time(const Time now) {
         {
-            unique_lock lock(mLock);
+            unique_lock lock(*this);
             /* push the time ! */
             // sometimes now is 0 -- when I ungrab-keyboard from sfc.
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_locked();
             }
             else
                 mCurrent_time = now;
+
+            run_automaton_loop(false);
         }
 
-        run_automaton(false);
+        if (config && config->debug) {
+            log_queues("Before flushing:");
+        }
+
+        flush_to_next();
+
         return next_decision_time();
     }
 
@@ -1325,7 +1377,16 @@ public:
         /* bug: if we were frozen, then we have a sequence of keys, which
          * might be already released, so the head is not to be forked!
          */
-        run_automaton(true);
+        {
+            unique_lock lock(*this);
+            run_automaton_loop(true);
+        }
+
+        if (config && config->debug) {
+            log_queues("Before flushing:");
+        }
+
+        flush_to_next();
     }
 
 };
