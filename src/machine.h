@@ -77,22 +77,12 @@ private:
     mutable std::mutex mLock;
     using  unique_lock = std::unique_lock<std::mutex>;
 
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
     void check_locked() const {}
 #else
     int mLock = 0;
 
     using  unique_lock = empty_unique_lock<int>;
 
-    void lock() const {}
-    void unlock() const {}
     void check_locked() const {}
 #endif
 
@@ -933,10 +923,10 @@ private:
                     }
                 }
             }
-        }
 
-        if (config->debug) {
-            log_queues("Before flushing:");
+            if (config->debug) {
+                log_queues("Before flushing:");
+            }
         }
         // unlocked now, why?
         flush_to_next();
@@ -1325,6 +1315,7 @@ public:
         /* bug: if we were frozen, then we have a sequence of keys, which
          * might be already released, so the head is not to be forked!
          */
+        unique_lock lock(mLock);
         run_automaton(true);
     }
 
