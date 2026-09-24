@@ -164,6 +164,19 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, AcceptTimeBackwards) {
+  EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
+
+  Time next1 = fm->accept_time(100);
+  EXPECT_EQ(next1, 0);
+
+  // Time moving backwards should log bug and return next decision time without deadlock
+  Time next2 = fm->accept_time(50);
+  EXPECT_EQ(next2, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 
