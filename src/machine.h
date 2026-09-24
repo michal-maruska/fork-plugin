@@ -85,12 +85,16 @@ private:
     {
         mLock.unlock();
     }
+    void lock() const { do_lock(); }
+    void unlock() const { do_unlock(); }
     void check_locked() const {}
 #else
     int mLock = 0;
 
     using  unique_lock = empty_unique_lock<int>;
 
+    void do_lock() const {}
+    void do_unlock() const {}
     void lock() const {}
     void unlock() const {}
     void check_locked() const {}
@@ -933,11 +937,12 @@ private:
                     }
                 }
             }
+
+            if (config->debug) {
+                log_queues("Before flushing:");
+            }
         }
 
-        if (config->debug) {
-            log_queues("Before flushing:");
-        }
         // unlocked now, why?
         flush_to_next();
     };
@@ -1039,15 +1044,21 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+private:
+    [[nodiscard]] Time next_decision_time_unlocked() const {
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+public:
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
     }
 
 
@@ -1132,17 +1143,13 @@ public:
         };
 
         publisher->prepare(max_requested);
-#if DISABLE_STD_LIBRARY
+#ifndef DISABLE_STD_LIBRARY
         std::function<void(const archived_event_t&)> lambda =
             [publisher](const archived_event_t& ev){ publisher->event(ev); };
-        // auto f = std::function<void(const archived_event&)>(bind(publisher->event(), publisher,));
 
-        // todo:
-        // fixme: we need to increase an iterator .. pointer .... to the C array!
-        // last_events.
-        for_each(last_events_log.begin(),
-                 last_events_log.end(),
-                 lambda);
+        std::for_each(last_events_log.begin(),
+                      last_events_log.end(),
+                      lambda);
 #endif
         mdb("sending %d events\n", max_requested);
 
@@ -1190,14 +1197,8 @@ public:
 
     void dump_last_events(event_dumper<archived_event_t>* dumper) const {
         unique_lock lock(mLock);
-#if DISABLE_STD_LIBRARY
-#if 0
-        std::function<void(const event_dumper&, const archived_event_t&)> doit0 = &event_dumper::operator();
-        // lambda?
-        std::function<void(const archived_event_t&)> doit = std::bind(&event_dumper::operator(), doit, placeholders::_1);
-#else
+#ifndef DISABLE_STD_LIBRARY
         std::function<void(const archived_event_t&)> lambda = [dumper](const archived_event_t& ev){ dumper->operator()(ev); };
-#endif
         if (last_events_log.full()) {
             std::for_each(last_events_log.begin(),
                           last_events_log.end(),
@@ -1207,7 +1208,7 @@ public:
                           last_events_log.begin() + last_events_log.size(),
                           lambda);
         }
-#endif // DISABLE_STD_LIBRARY
+#endif
     }
 
 private:
@@ -1304,7 +1305,7 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;
