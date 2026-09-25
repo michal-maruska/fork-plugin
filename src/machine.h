@@ -75,24 +75,26 @@ private:
 
 #ifndef DISABLE_STD_LIBRARY
     mutable std::mutex mLock;
-    using  unique_lock = std::unique_lock<std::mutex>;
+    using unique_lock = std::unique_lock<std::mutex>;
 
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
+    void lock() const { mLock.lock(); }
+    void unlock() const { mLock.unlock(); }
+    void do_lock() const { lock(); }
+    void do_unlock() const { unlock(); }
     void check_locked() const {}
 #else
-    int mLock = 0;
+    struct empty_mutex {
+        void lock() {}
+        void unlock() {}
+    };
+    mutable empty_mutex mLock;
 
-    using  unique_lock = empty_unique_lock<int>;
+    using unique_lock = empty_unique_lock<empty_mutex>;
 
     void lock() const {}
     void unlock() const {}
+    void do_lock() const {}
+    void do_unlock() const {}
     void check_locked() const {}
 #endif
 
@@ -361,6 +363,7 @@ public:
     void stop() {
         // wait & stop
         unique_lock wait_lock(mLock);
+        (void)wait_lock;
     }
 
 
@@ -933,11 +936,12 @@ private:
                     }
                 }
             }
+
+            if (config && config->debug) {
+                log_queues("Before flushing:");
+            }
         }
 
-        if (config->debug) {
-            log_queues("Before flushing:");
-        }
         // unlocked now, why?
         flush_to_next();
     };
@@ -1039,15 +1043,19 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+    [[nodiscard]] Time next_decision_time_unlocked() const {
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
     }
 
 
@@ -1274,7 +1282,7 @@ public:
             // no need:
             mCurrent_time = 0;
 
-            if (key > MAX_KEYCODE) {
+            if (key >= MAX_KEYCODE) {
                 mdb("%s: out-of-bound event %d\n", __func__);
                 return 0;
             }
@@ -1304,7 +1312,7 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;
