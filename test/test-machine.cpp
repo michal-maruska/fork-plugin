@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
+#include <vector>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -160,6 +162,38 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, AcceptTimeBackwards) {
+  fm->accept_time(100);
+  // Calling accept_time with backwards time (50 < 100) must not deadlock or crash.
+  Time decision = fm->accept_time(50);
+  EXPECT_EQ(decision, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConcurrentAccess) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, push_time).Times(AnyNumber());
+
+  constexpr int num_threads = 4;
+  constexpr int iterations = 100;
+  std::vector<std::thread> threads;
+
+  for (int i = 0; i < num_threads; ++i) {
+    threads.emplace_back([this, i]() {
+      for (int j = 0; j < iterations; ++j) {
+        fm->accept_time(10 + i * iterations + j);
+      }
+    });
+  }
+
+  for (auto& t : threads) {
+    t.join();
+  }
 
   Mock::VerifyAndClearExpectations(environment);
 }
