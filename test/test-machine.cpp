@@ -164,6 +164,19 @@ TEST_F(machineTest, Configure) {
   Mock::VerifyAndClearExpectations(environment);
 }
 
+TEST_F(machineTest, AcceptTimeBackwardTimeNoDeadlock) {
+  EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, push_time(100)).Times(1);
+
+  fm->accept_time(100);
+
+  // Send backward time 50. Previously this caused a recursive lock deadlock.
+  Time next = fm->accept_time(50);
+  EXPECT_EQ(next, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
 #if 0
 // fixme: I need equal_to()
 
