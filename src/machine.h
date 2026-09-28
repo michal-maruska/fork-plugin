@@ -77,22 +77,12 @@ private:
     mutable std::mutex mLock;
     using  unique_lock = std::unique_lock<std::mutex>;
 
-    void do_lock() const
-    {
-        mLock.lock();
-    }
-    void do_unlock() const
-    {
-        mLock.unlock();
-    }
     void check_locked() const {}
 #else
     int mLock = 0;
 
     using  unique_lock = empty_unique_lock<int>;
 
-    void lock() const {}
-    void unlock() const {}
     void check_locked() const {}
 #endif
 
@@ -458,7 +448,6 @@ private:
 
    /**
     * We concluded the key is forked. "Output" it and prepare for the next one.
-    * fixme: locking -- possibly unlocks?
     */
     void activate_fork_rewind(fork_reason_t fork_reason) {
         UNUSED(fork_reason);
@@ -511,7 +500,6 @@ private:
     }
 
     // is mDecision_time always recalculated?
-    // possibly unlocks
     void apply_event_to_normal(const PlatformEvent &pevent) {
 
         const Keycode key = environment->detail_of(pevent);
@@ -894,51 +882,46 @@ private:
      */
 
     /**
+     * Internal implementation of running the automaton. Must be called with mLock held.
+     */
+    void run_automaton_unlocked(bool force_also) {
+        check_locked();
+        // notice that instead of recursion, all the calls to `rewind_machine' are
+        // followed by return to this cycle!
+        while (! environment->output_frozen()) {
+
+            if (! tq.third_empty()) {
+                const PlatformEvent& event = tq.peek_third();
+                transition_by_key(event);
+            } else {
+                if ((state != st_normal) && mCurrent_time) {
+                    if (transition_by_time(mCurrent_time))
+                        // If this time helped to decide -> machine rewound,
+                        // we have to try again, maybe the queue is not empty?.
+                        continue;
+                }
+
+                if (force_also && (state != st_normal)) {
+                    transition_by_force();
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
      * Take from `input_queue', + the mCurrent_time + force  -> run the machine.
      */
     void run_automaton(bool force_also) {
-        // fixme: maybe All I need is the nextPlugin?
         {
             unique_lock lock(mLock);
-#if 0
-            if (environment->output_frozen() || (! tq.middle_empty() )) {
-                // log_queues_and_nextplugin(message)
-                mdb("%s: next %sfrozen: internal %d, input: %d\n", __func__,
-                    (environment->output_frozen()?"":"NOT "),
-                    internal_queue.length(),
-                    input_queue.length());
-            }
-#endif
-            // notice that instead of recursion, all the calls to `rewind_machine' are
-            // followed by return to this cycle!
-            while (! environment->output_frozen()) {
-
-                if (! tq.third_empty()) {
-                    const PlatformEvent& event = tq.peek_third();
-                    transition_by_key(event); // here crash?
-                } else {
-                    if ((state != st_normal) && mCurrent_time) {
-                        // !middle_empty()
-                        if (transition_by_time(mCurrent_time))
-                            // If this time helped to decide -> machine rewound,
-                            // we have to try again, maybe the queue is not empty?.
-                            continue;
-                    }
-
-                    if (force_also && (state != st_normal)) {
-                        // !middle_empty()
-                        transition_by_force();
-                    } else {
-                        break;
-                    }
-                }
-            }
+            run_automaton_unlocked(force_also);
         }
 
         if (config->debug) {
             log_queues("Before flushing:");
         }
-        // unlocked now, why?
         flush_to_next();
     };
 
@@ -1039,15 +1022,20 @@ private:
         }
     }
 
-    // fixme: returned by the accept_* public API methods
-    [[nodiscard]] Time next_decision_time() const {
-        unique_lock lock(mLock);
+    [[nodiscard]] Time next_decision_time_unlocked() const {
+        check_locked();
         if ((state == st_verify)
             || (state == st_suspect))
             // we are indeed waiting:
             return mDecision_time;
         else
             return 0;
+    }
+
+    // fixme: returned by the accept_* public API methods
+    [[nodiscard]] Time next_decision_time() const {
+        unique_lock lock(mLock);
+        return next_decision_time_unlocked();
     }
 
 
@@ -1248,30 +1236,21 @@ public:
      * Environment.
      */
     Time accept_event(const PlatformEvent& pevent) noexcept(false) {
+        Time next_time = 0;
         {
             unique_lock lock(mLock);
             const Keycode key = environment->detail_of(pevent);
-#if 0
-            environment->fmt_event(__func__, pevent);
-#else
-            // mdb("%s: event time: %ul\n", __func__, );
+
             mdb("%s: event %u (%s) time: %" TIME_FMT "\n",
                 __func__,
                 environment->detail_of(pevent),
                 environment->press_p(pevent)?"press":"release",
                 environment->time_of(pevent));
-#endif
-// todo: if  forked (= modifier), and Press repeated -> discard. Just time.
-// if same press already in the queue?
-
-            // fixme: mouse must not preempt us. But what if it does?
-            // mmc: allocation:
 
             if (mCurrent_time > environment->time_of(pevent)) {
                 mdb("%s: bug: time moved backwards!\n", __func__);
             }
 
-            // no need:
             mCurrent_time = 0;
 
             if (key > MAX_KEYCODE) {
@@ -1279,24 +1258,29 @@ public:
                 return 0;
             }
 
-            // here:
             if (environment->press_p(pevent)
                 && key_forked(key))
             {
                 mdb("%s: skipping this Press -- it's a forked modifier and AR!\n", __func__);
-                // environment->free_event(&pevent);
-                // return;
             } else {
                 tq.push(pevent);
             }
-        }
-        run_automaton(false);
 
-        return next_decision_time();
+            run_automaton_unlocked(false);
+            next_time = next_decision_time_unlocked();
+        }
+
+        if (config->debug) {
+            log_queues("Before flushing:");
+        }
+        flush_to_next();
+
+        return next_time;
     }
 
 
     Time accept_time(const Time now) {
+        Time next_time = 0;
         {
             unique_lock lock(mLock);
             /* push the time ! */
@@ -1304,14 +1288,21 @@ public:
             if (mCurrent_time > now) {
                 // unconditionally:
                 environment->log("%s: bug: time moved backwards!\n", __func__);
-                return next_decision_time();
+                return next_decision_time_unlocked();
             }
             else
                 mCurrent_time = now;
+
+            run_automaton_unlocked(false);
+            next_time = next_decision_time_unlocked();
         }
 
-        run_automaton(false);
-        return next_decision_time();
+        if (config->debug) {
+            log_queues("Before flushing:");
+        }
+        flush_to_next();
+
+        return next_time;
     }
 
     /** public api
@@ -1322,10 +1313,15 @@ public:
      * configurable)
      */
     void accept_confirmation() { // fixme!
-        /* bug: if we were frozen, then we have a sequence of keys, which
-         * might be already released, so the head is not to be forked!
-         */
-        run_automaton(true);
+        {
+            unique_lock lock(mLock);
+            run_automaton_unlocked(true);
+        }
+
+        if (config->debug) {
+            log_queues("Before flushing:");
+        }
+        flush_to_next();
     }
 
 };
