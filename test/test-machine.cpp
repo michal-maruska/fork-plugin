@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
+#include <vector>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -160,6 +162,44 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConcurrentEvents) {
+  EXPECT_CALL(*environment, output_frozen).Times(AnyNumber()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, detail_of(testing::_)).Times(AnyNumber()).WillRepeatedly(Return(56));
+  EXPECT_CALL(*environment, time_of(testing::_)).Times(AnyNumber()).WillRepeatedly(Return(100));
+  EXPECT_CALL(*environment, press_p(testing::_)).Times(AnyNumber()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*environment, release_p(testing::_)).Times(AnyNumber()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, ignore_event(testing::_)).Times(AnyNumber()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, relay_event(testing::_)).Times(AnyNumber());
+  EXPECT_CALL(*environment, push_time(testing::_)).Times(AnyNumber());
+  EXPECT_CALL(*environment, rewrite_event(testing::_, testing::_)).Times(AnyNumber());
+
+  constexpr int num_threads = 4;
+  constexpr int iterations = 200;
+  std::vector<std::thread> threads;
+  threads.reserve(num_threads);
+
+  for (int t = 0; t < num_threads; ++t) {
+    threads.emplace_back([this, t]() {
+      for (int i = 0; i < iterations; ++i) {
+        TestEvent pevent(100 + i, 56 + (i % 5));
+        fm->accept_event(pevent);
+        if (i % 10 == 0) {
+          fm->accept_time(100 + i);
+          fm->accept_confirmation();
+          fm->configure_key(fork_configure_key_fork, 56 + (i % 5), 80 + (i % 5), 1);
+          fm->set_debug(i % 2);
+        }
+      }
+    });
+  }
+
+  for (auto& th : threads) {
+    th.join();
+  }
 
   Mock::VerifyAndClearExpectations(environment);
 }
