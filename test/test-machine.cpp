@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <thread>
 
 #include "../src/machine.h"
 #include "../src/platform.h"
@@ -160,6 +161,42 @@ TEST_F(machineTest, Configure) {
   KeyCode B = 11;
   fm->configure_key(fork_configure_key_fork, A, B, 1);
   EXPECT_EQ(config->fork_keycode[A], B);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, AcceptTimeBackwards) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, push_time).Times(AnyNumber());
+
+  Time next1 = fm->accept_time(100);
+  EXPECT_EQ(next1, 0);
+
+  // Time moving backwards should be handled gracefully without deadlock
+  Time next2 = fm->accept_time(50);
+  EXPECT_EQ(next2, 0);
+
+  Mock::VerifyAndClearExpectations(environment);
+}
+
+TEST_F(machineTest, ConcurrentAccess) {
+  EXPECT_CALL(*environment, output_frozen).WillRepeatedly(Return(false));
+  EXPECT_CALL(*environment, push_time).Times(AnyNumber());
+
+  std::thread t1([this]() {
+    for (int i = 0; i < 100; ++i) {
+      fm->accept_time(10 + i);
+    }
+  });
+
+  std::thread t2([this]() {
+    for (int i = 0; i < 100; ++i) {
+      fm->set_debug(i % 2);
+    }
+  });
+
+  t1.join();
+  t2.join();
 
   Mock::VerifyAndClearExpectations(environment);
 }
