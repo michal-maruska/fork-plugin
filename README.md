@@ -1,6 +1,14 @@
 # Keyboard filter driver
 
-## Summary:  Use "[home row](https://en.wikipedia.org/wiki/Touch_typing#Home_row)" keys as modifiers (shift, hyper, super, kana,roya)
+## 2026: this repository has been divided and migrated into:
+* platform independent core, with tests, and currently still xorg frontend/wrapper.
+   Plugin for libinput also still here, but built as a separate project. [core](https://github.com/michal-maruska/fork-plugin-core)
+* Windows specific frontends -- application and kernel driver [windows-fork](https://github.com/michal-maruska/fork-plugin-win-hook)
+
+Hence Deprecated documentation:
+
+## Summary:  Use "[home row](https://en.wikipedia.org/wiki/Touch_typing#Home_row)" keys as modifiers (shift, hyper, super, (on
+Windows:) kana,roya)
 
 This is a filter which parses the stream of keyboard events and detects _simultaneous_
 key-presses to reinterpret specific use of selected keys as modifiers, instead
@@ -10,9 +18,8 @@ of their regular function. Also the _timing_ is significant.
 
 Packaged as a plugin for X server, Weston plugin, and a Windows 10+ filter kernel driver.
 
-It is very similar to what qmk calls [Mod-Tap
-keys](https://github.com/qmk/qmk_firmware/blob/master/docs/mod_tap.md)..... but here (apart from working with regular
-keyboards) we can trigger the switch to modifier by mouse movement too!
+It is very similar to what qmk calls [Mod-Tapkeys](https://github.com/qmk/qmk_firmware/blob/master/docs/mod_tap.md)..... but here (apart from working with regular
+keyboards) we can trigger the switch to modifier by _mouse_ click too!
 This is a big plus -- switching to modifier instantly when mouse is clicked, to drag, or resize, based on the modifier.
 
 ## How to install?
@@ -26,8 +33,8 @@ This is a big plus -- switching to modifier instantly when mouse is clicked, to 
       [xserver](https://github.com/michal-maruska/xserver/commits/mmc-all)
 
   - Weston --
-      a patch is needed for [libinput](https://github.com/MichalMaruska/libinput/commits/main/)
-      and [weston](https://github.com/MichalMaruska/weston/commits/main/)
+      a patch is needed for [libinput](https://github.com/michal-maruska/libinput/commits/main/)
+      and [weston](https://github.com/michal-maruska/weston/commits/main/)
 
 
 * for [Mac](https://developer.apple.com/documentation/driverkit/creating-a-driver-using-the-driverkit-sdk) not yet.
